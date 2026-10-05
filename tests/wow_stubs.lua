@@ -173,6 +173,7 @@ function WoW.reset()
     WoW.popupShown = 0
     WoW.eventFrames = {}                            -- GetFramesRegisteredForEvent's answer
     WoW.chatOut = {}
+    WoW.now = 1000                                  -- GetTime(); WoW.tick and WoW.advance move it
 
     UIParent = newWidget("Frame", nil, "UIParent")
     WorldFrame = newWidget("Frame", nil, "WorldFrame")
@@ -236,6 +237,7 @@ end
 -- Run every visible frame's OnUpdate `n` times.
 function WoW.tick(dt, n)
     for _ = 1, n or 1 do
+        WoW.now = WoW.now + (dt or 0)
         for _, w in ipairs(WoW.frames) do
             local fn = w._scripts.OnUpdate
             if fn and visible(w) then fn(w, dt) end
@@ -277,6 +279,10 @@ end
 
 strmatch = string.match   -- LibStub uses it
 
+-- Time passing with no frame drawn (no OnUpdate runs).
+function WoW.advance(seconds) WoW.now = WoW.now + seconds end
+
+function GetTime() return WoW.now end
 function InCombatLockdown() return WoW.inCombat end
 function IsLoggedIn() return WoW.loggedIn end
 function IsMounted() return WoW.mounted end

@@ -121,8 +121,19 @@ local M = {
     { "a hidden UI does not lift the anchor", {
         { "        if anchor then I.Lift(inst, anchor, strata) end\n        return true\n", "        return true\n" } } },
     { "a dialog already up is hidden with the UI", {
-        { '    if I.AnyDialogShown(false) then return false, "dialog" end\n', "" } } },
-    { "the reveal events ignored", { { "    if IS_REVEAL_EVENT[event] then\n", "    if false then\n" } } },
+        { "    if I.AnyDialogShown(false) or I.PromptOpen() then", "    if I.PromptOpen() then" } } },
+    { "an open prompt is hidden with the UI", {
+        { "    if I.AnyDialogShown(false) or I.PromptOpen() then", "    if I.AnyDialogShown(false) then" } } },
+    { "the prompt events ignored", { { "    if I.OnPromptEvent(event, ...) then return end\n", "" } } },
+    { "a prompt's end event ignored", { { "    elseif stop then\n", "    elseif false then\n" } } },
+    { "a prompt never expires", {
+        { "        if expires <= now then st.prompts[k] = nil else open = true end", "        open = true" } } },
+    { "a prompt's own time limit ignored", {
+        { "        if not seconds or seconds <= 0 then seconds = PROMPT_TIMEOUT end", "        seconds = PROMPT_TIMEOUT" } } },
+    { "CANCEL_ALL_LOOT_ROLLS ends one roll", { { '        if key:sub(-1) == "*" then\n', "        if false then\n" } } },
+    { "the heal ignores another instance's lease", {
+        { "    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end",
+          "    if st.cam.active then return false end" } } },
     { "the reveal events not registered", {
         { "        pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, ev)\n", "" } } },
     { "a missing shoulder CVar is created", {

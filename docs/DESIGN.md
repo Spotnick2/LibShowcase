@@ -107,9 +107,15 @@ owner.
   **Prompts that are not StaticPopups** (each its own frame under UIParent) do the same through
   their events, which the library listens to (touching nothing): `READY_CHECK`,
   `LFG_PROPOSAL_SHOW`, `LFG_ROLE_CHECK_SHOW`, `ROLE_POLL_BEGIN`, `PVP_ROLE_POPUP_SHOW`,
-  `START_LOOT_ROLL` (all in the 70205 dump). **A StaticPopup already up** when the UI would be
-  hidden keeps it up: its Show already happened, so nothing would bring it back (`HideGameUI`
-  returns `false, "dialog"`; `Enter` presents with the UI up).
+  `START_LOOT_ROLL` (all in the 70205 dump). Each stays **open** until its end event
+  (`READY_CHECK_FINISHED`, `LFG_PROPOSAL_DONE`/`_FAILED`/`_SUCCEEDED`, `LFG_ROLE_CHECK_HIDE`/
+  `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`), its
+  own time limit (the ready check's, the roll's), or 60 s (the role poll has no end event). A roll
+  the player answers ends no earlier than its time limit, so the UI may stay up a little longer.
+  **A StaticPopup already up, or a prompt still open,** when the UI would be hidden keeps it up:
+  its Show already happened, so nothing would bring it back (`HideGameUI` returns
+  `false, "dialog"`; `Enter` presents with the UI up). That covers a prompt started before `Enter`,
+  and a `HideGameUI` right after a prompt revealed the UI.
   MEASURED 70205 (`/lsprobe invite`): a real party invite while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held), the `PARTY_INVITE` dialog's
   `which` read secure (`issecurevariable`), accepting it worked, and the later `QUIT` dialog was
@@ -119,7 +125,8 @@ owner.
 - **Crash self-heal:** `Enter` writes the capture (view slot, zoom, every CVar it changes, the
   pitch limit, the zoom cap) into `db.LibShowcaseCapture`; a restore clears it; a capture still
   there at `PLAYER_LOGIN` (or at `New`, after login, or at that instance's next `Enter`, before
-  it captures) is restored. MEASURED 70205: `CameraKeepCharacterCentered` keeps a changed value
+  it captures) is restored. Never while another instance holds the lease (camera-OFF, deferred
+  cleanup) or presents: the capture is kept, and that instance's next `Enter` heals it. MEASURED 70205: `CameraKeepCharacterCentered` keeps a changed value
   across a `/reload`. **Limit:** the client writes SavedVariables only at a logout or a
   `/reload`, and both fire `PLAYER_LOGOUT`, whose restore clears the capture first. So after a
   real crash the file on disk holds no capture and nothing is healed. (Whether the changed CVars
@@ -152,7 +159,7 @@ methods in `lib.methods` (a plain table, the instances' `__index`) dispatch to `
 time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer callbacks; every table keeps its
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
-newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (75 mutations, all red).
+newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (81 mutations, all red).
 
 ## Deliberate differences from AltStable's block
 

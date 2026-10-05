@@ -426,10 +426,11 @@ function I.HideUI(inst, anchor)
     end
     if InCombat() then return false, "combat" end
     if type(SetUIVisibility) ~= "function" then return false, "unsupported" end
-    -- A Blizzard dialog already up (an invite, a summon) would vanish with the
+    -- A Blizzard dialog already up (an invite, a summon), or a prompt still
+    -- open (a ready check, a loot roll: PROMPT_START), would vanish with the
     -- UI and nothing would bring it back: its Show already happened. Leave
     -- the UI up, as a dialog appearing later brings it back.
-    if I.AnyDialogShown(false) then return false, "dialog" end
+    if I.AnyDialogShown(false) or I.PromptOpen() then return false, "dialog" end
 
     -- Close an open chat edit box: hidden mid-input and shown again, it comes
     -- back half-focused and un-closable.
@@ -494,7 +495,7 @@ end
 -- dialog failed: ADDON_ACTION_FORBIDDEN, ForceQuit() from StaticPopup_OnClick.
 --
 -- So a dialog that appears while the library has the game UI hidden (a guild
--- or party invite, a summon; a ready check, a loot roll: REVEAL_EVENTS below)
+-- or party invite, a summon; a ready check, a loot roll: PROMPT_START below)
 -- brings the UI back, and the dialog shows where Blizzard put it, untouched.
 -- The presentation goes on: camera, lease, the consumer's window (back under
 -- the shown UIParent). Post-hooks (hooksecurefunc) on StaticPopup_Show and
@@ -538,14 +539,77 @@ end
 
 -- Prompts Blizzard shows WITHOUT StaticPopup_Show, each its own frame under
 -- UIParent: a ready check, a dungeon-finder proposal or role check, a role
--- poll, a PvP role popup, a loot roll. Their events (all in the 70205 dump)
--- bring the UI back the same way; listening to an event touches nothing.
-local REVEAL_EVENTS = {
-    "READY_CHECK", "LFG_PROPOSAL_SHOW", "LFG_ROLE_CHECK_SHOW", "ROLE_POLL_BEGIN",
-    "PVP_ROLE_POPUP_SHOW", "START_LOOT_ROLL",
+-- poll, a PvP role popup, a loot roll. Their start events (all in the 70205
+-- dump) bring the UI back the same way; listening to an event touches
+-- nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
+-- until its end event, or its own time limit, or PROMPT_TIMEOUT: while one is
+-- open the UI is not hidden (HideUI), as for a StaticPopup already up. The
+-- role poll has no end event; its timeout ends it.
+local PROMPT_TIMEOUT = 60
+local PROMPT_START = {   -- event -> function(...) returning key, seconds?
+    READY_CHECK         = function(_, timeLeft) return "ready", tonumber(timeLeft) end,
+    LFG_PROPOSAL_SHOW   = function() return "lfg" end,
+    LFG_ROLE_CHECK_SHOW = function() return "rolecheck" end,
+    ROLE_POLL_BEGIN     = function() return "rolepoll" end,
+    PVP_ROLE_POPUP_SHOW = function() return "pvprole" end,
+    START_LOOT_ROLL     = function(rollID, rollTime)
+        return "roll:" .. tostring(rollID), (tonumber(rollTime) or 0) / 1000   -- milliseconds
+    end,
 }
-local IS_REVEAL_EVENT = {}
-for _, ev in ipairs(REVEAL_EVENTS) do IS_REVEAL_EVENT[ev] = true end
+local PROMPT_END = {     -- event -> function(...) returning the key, or a key prefix ending in "*"
+    READY_CHECK_FINISHED   = function() return "ready" end,
+    LFG_PROPOSAL_DONE      = function() return "lfg" end,
+    LFG_PROPOSAL_FAILED    = function() return "lfg" end,
+    LFG_PROPOSAL_SUCCEEDED = function() return "lfg" end,
+    LFG_ROLE_CHECK_HIDE    = function() return "rolecheck" end,
+    LFG_ROLE_CHECK_DECLINED = function() return "rolecheck" end,
+    PVP_ROLE_POPUP_HIDE    = function() return "pvprole" end,
+    CANCEL_LOOT_ROLL       = function(rollID) return "roll:" .. tostring(rollID) end,
+    CANCEL_ALL_LOOT_ROLLS  = function() return "roll:*" end,
+}
+local PROMPT_EVENTS = {}
+for ev in pairs(PROMPT_START) do PROMPT_EVENTS[#PROMPT_EVENTS + 1] = ev end
+for ev in pairs(PROMPT_END) do PROMPT_EVENTS[#PROMPT_EVENTS + 1] = ev end
+table.sort(PROMPT_EVENTS)
+
+st.prompts = st.prompts or {}
+
+local function Now()
+    return type(GetTime) == "function" and tonumber(GetTime()) or 0
+end
+
+-- A start or end event: true when it was one.
+function I.OnPromptEvent(event, ...)
+    local start, stop = PROMPT_START[event], PROMPT_END[event]
+    if start then
+        local key, seconds = start(...)
+        if not seconds or seconds <= 0 then seconds = PROMPT_TIMEOUT end
+        st.prompts[key] = Now() + math.min(seconds, PROMPT_TIMEOUT) + 1
+        I.RevealForDialog("dialog")
+        return true
+    elseif stop then
+        local key = stop(...)
+        if key:sub(-1) == "*" then
+            local prefix = key:sub(1, -2)
+            for k in pairs(st.prompts) do
+                if k:sub(1, #prefix) == prefix then st.prompts[k] = nil end
+            end
+        else
+            st.prompts[key] = nil
+        end
+        return true
+    end
+    return false
+end
+
+-- Any prompt still open (expired ones are dropped).
+function I.PromptOpen()
+    local now, open = Now(), false
+    for k, expires in pairs(st.prompts) do
+        if expires <= now then st.prompts[k] = nil else open = true end
+    end
+    return open
+end
 
 -- "Reveal for a dialog": brings the game UI back (as above) and hands the
 -- dialog back UNTOUCHED. Does nothing when the UI is up or the caller does
@@ -1055,7 +1119,10 @@ end
 -- A capture still in a db at login means the last session ended without a
 -- restore (a crash, a killed client): put the player's camera back.
 function I.Heal(inst)
-    if st.cam.active then return false end
+    -- Not while the camera is someone else's: another instance's lease (a
+    -- camera-OFF owner, deferred cleanup) or a presentation. The capture
+    -- stays; this instance's next Enter heals it, holding the lease.
+    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end
     local db = I.DB(inst)
     local cap = db and db[lib.DB_KEY]
     if type(cap) ~= "table" then return false end
@@ -1066,10 +1133,7 @@ function I.Heal(inst)
 end
 
 function I.OnEvent(event, ...)
-    if IS_REVEAL_EVENT[event] then
-        I.RevealForDialog("dialog")
-        return
-    end
+    if I.OnPromptEvent(event, ...) then return end
     if event == "PLAYER_LOGIN" then
         I.InstallDialogHooks()
         for _, inst in ipairs(lib.instances) do I.Heal(inst) end
@@ -1141,7 +1205,7 @@ for _, ev in ipairs({ "PLAYER_LOGIN", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENA
     end
 end
 -- pcall: a client without one of these events must not stop the load.
-for _, ev in ipairs(REVEAL_EVENTS) do
+for _, ev in ipairs(PROMPT_EVENTS) do
     if not lib.events[ev] then
         lib.events[ev] = true
         pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, ev)

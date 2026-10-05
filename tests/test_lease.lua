@@ -342,21 +342,63 @@ do
     local SC = lib:New({ owner = "A",
         onGameUIShown = function(r) shown[#shown + 1] = r end,
         onForcedExit = function(r) forced[#forced + 1] = r end })
-    for i, ev in ipairs({ "READY_CHECK", "LFG_PROPOSAL_SHOW", "LFG_ROLE_CHECK_SHOW", "ROLE_POLL_BEGIN",
-                          "PVP_ROLE_POPUP_SHOW", "START_LOOT_ROLL" }) do
+    -- { start event, its args, the end event (nil: none), its args }
+    local prompts = {
+        { "READY_CHECK", { "Leader", 35 }, "READY_CHECK_FINISHED", {} },
+        { "LFG_PROPOSAL_SHOW", {}, "LFG_PROPOSAL_FAILED", {} },
+        { "LFG_ROLE_CHECK_SHOW", { false }, "LFG_ROLE_CHECK_HIDE", {} },
+        { "ROLE_POLL_BEGIN", { "Leader" }, nil },
+        { "PVP_ROLE_POPUP_SHOW", { {} }, "PVP_ROLE_POPUP_HIDE", {} },
+        { "START_LOOT_ROLL", { 7, 60000 }, "CANCEL_LOOT_ROLL", { 7 } },
+    }
+    for i, p in ipairs(prompts) do
+        local ev = p[1]
         local win = newWindow()
         SC:Enter(win)
         check(not UIParent:IsShown(), ev .. ": presenting with the UI hidden")
-        WoW.fire(ev, 1, 60)
+        WoW.fire(ev, unpack(p[2]))
         check(UIParent:IsShown(), ev .. " brings the UI back")
         check(SC:IsActive() and SC:IsOwner(), "  presentation and lease kept")
         check(#shown == i and shown[i] == "dialog", "  onGameUIShown(\"dialog\"), once")
+        -- Revealed, then HideGameUI: the prompt is still open, so no.
+        local ok, why = SC:HideGameUI(win)
+        check(ok == false and why == "dialog", "  HideGameUI while it is open: false, \"dialog\"")
+        check(UIParent:IsShown(), "  the UI stays up")
+        if p[3] then
+            WoW.fire(p[3], unpack(p[4]))
+            check(SC:HideGameUI(win), "  after " .. p[3] .. ", the UI hides again")
+        else
+            WoW.advance(30)
+            eq(select(2, SC:HideGameUI(win)), "dialog", "  no end event: still open 30 s later")
+            WoW.advance(31)
+            check(SC:HideGameUI(win), "  and closed by the timeout")
+        end
         SC:ForceRestore()
     end
     eq(#forced, 0, "none is read as Escape/Alt+Z")
+
+    -- Started before Enter: Enter presents with the UI up, until it ends.
+    WoW.fire("READY_CHECK", "Leader", 35)
+    local win = newWindow()
+    check(SC:Enter(win), "a ready check open before Enter: Enter still presents")
+    check(UIParent:IsShown() and not SC:IsGameUIHidden(), "  with the UI up")
+    WoW.advance(37)
+    check(SC:HideGameUI(win), "  its own time limit (35 s) ends it")
+    SC:ForceRestore()
+
+    -- Loot rolls by rollID; CANCEL_ALL_LOOT_ROLLS ends them all.
+    WoW.fire("START_LOOT_ROLL", 1, 60000)
+    WoW.fire("START_LOOT_ROLL", 2, 60000)
+    WoW.fire("CANCEL_LOOT_ROLL", 1)
+    eq(select(2, SC:HideGameUI()), "dialog", "roll 2 still open after roll 1 ends")
+    WoW.fire("CANCEL_ALL_LOOT_ROLLS")
+    check(SC:HideGameUI(), "CANCEL_ALL_LOOT_ROLLS ends every roll")
+    SC:RestoreGameUI()
+
     local mark = #WoW.calls
     WoW.fire("READY_CHECK", "Leader", 30)
     eq(#callsSince(mark), 0, "with no lease, a ready check makes no call")
+    WoW.fire("READY_CHECK_FINISHED")
 end
 
 -- HideGameUI, then Enter(window): the window still comes up above the UI.
@@ -471,6 +513,25 @@ do
     eq(DB4.LibShowcaseCapture.CameraKeepCharacterCentered, "1", "  healed first: its capture holds the player's value")
     B:ForceRestore()
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  so its restore puts the player's value back")
+
+    -- A camera-OFF owner (no presentation, cam.active false) still owns the
+    -- camera: a load-on-demand New with a leftover capture leaves it alone.
+    lib = freshLibrary()
+    WoW.loggedIn = true
+    local C = lib:New({ owner = "C" })
+    C:Acquire()
+    C:HideGameUI(newWindow())
+    WoW.cvars.CameraKeepCharacterCentered = "0"
+    local DB5 = { LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, CameraKeepCharacterCentered = "1" } }
+    local mark = #WoW.calls
+    local D = lib:New({ owner = "D", db = DB5 })
+    eq(#callsSince(mark), 0, "another instance's camera-OFF lease: New heals nothing (no camera call)")
+    check(DB5.LibShowcaseCapture ~= nil, "  the capture is kept")
+    check(C:IsOwner() and not D:IsOwner(), "  the lease is untouched")
+    C:Release()
+    check(D:Enter(newWindow()), "once it is free, D presents")
+    eq(DB5.LibShowcaseCapture.CameraKeepCharacterCentered, "1", "  healed first, holding the lease")
+    D:ForceRestore()
 end
 
 done("test_lease")
