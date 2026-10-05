@@ -115,7 +115,14 @@ owner.
   **A StaticPopup already up, or a prompt still open,** when the UI would be hidden keeps it up:
   its Show already happened, so nothing would bring it back (`HideGameUI` returns
   `false, "dialog"`; `Enter` presents with the UI up). That covers a prompt started before `Enter`,
-  and a `HideGameUI` right after a prompt revealed the UI.
+  and a `HideGameUI` right after a prompt revealed the UI. For a prompt that started **before the
+  first copy of the library loaded** (a load-on-demand consumer: no start event seen), the client
+  is asked too, read-only: `GetReadyCheckStatus("player") == "waiting"` with
+  `GetReadyCheckTimeLeft() > 0`, `GetLFGProposal()`, `GetLFGRoleUpdate()`, and
+  `GetLootRollTimeLeft(id) > 0` for each of `GetActiveLootRollIDs()`. These are in the 70205 dump by
+  name only; the Retail shapes are assumed (unmeasured, see Open measurements), each call is
+  `pcall`ed, and an unexpected answer counts as "not open". The role poll and the PvP role popup
+  have no getter.
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
   through `READY_CHECK`.
@@ -170,7 +177,7 @@ methods in `lib.methods` (a plain table, the instances' `__index`) dispatch to `
 time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer callbacks; every table keeps its
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
-newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (81 mutations, all red).
+newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (87 mutations, all red).
 
 ## Deliberate differences from AltStable's block
 
@@ -200,6 +207,7 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (81 muta
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
+| The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/lsprobe prompts` with a ready check (or a loot roll) waiting, then after answering |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
 securely (`issecurevariable`), and `/lsprobe focus` lists the tainted fields of the frame under the

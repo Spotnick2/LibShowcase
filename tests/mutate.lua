@@ -130,6 +130,14 @@ local M = {
         { "        if expires <= now then st.prompts[k] = nil else open = true end", "        open = true" } } },
     { "a prompt's own time limit ignored", {
         { "        if not seconds or seconds <= 0 then seconds = PROMPT_TIMEOUT end", "        seconds = PROMPT_TIMEOUT" } } },
+    { "the client's prompt state ignored", { { "    return open or I.LivePromptOpen()", "    return open" } } },
+    { "a live ready check ignored", { { '    if Ask("GetReadyCheckStatus", "player") == "waiting" then', '    if false then' } } },
+    { "a live ready check never times out", {
+        { '        if type(left) ~= "number" or left > 0 then return true end', "        return true" } } },
+    { "a live LFG proposal ignored", { { '    if Ask("GetLFGProposal") == true then return true end\n', "" } } },
+    { "a live role check ignored", { { '    if Ask("GetLFGRoleUpdate") == true then return true end\n', "" } } },
+    { "a live loot roll ignored", {
+        { '            if type(left) == "number" and left > 0 then return true end', "" } } },
     { "CANCEL_ALL_LOOT_ROLLS ends one roll", { { '        if key:sub(-1) == "*" then\n', "        if false then\n" } } },
     { "the heal ignores another instance's lease", {
         { "    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end",

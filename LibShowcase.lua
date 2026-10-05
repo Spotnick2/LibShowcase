@@ -602,13 +602,43 @@ function I.OnPromptEvent(event, ...)
     return false
 end
 
--- Any prompt still open (expired ones are dropped).
+-- The client's own answer, for a prompt that started before the first copy
+-- of the library loaded (a load-on-demand consumer: no start event seen).
+-- Read-only getters, each in the 70205 dump by name only (no signature):
+-- called through pcall, and any answer not of the expected shape counts as
+-- "not open". The role poll and the PvP role popup have no getter.
+local function Ask(name, ...)
+    local f = rawget(_G, name)
+    if type(f) ~= "function" then return nil end
+    local ok, a = pcall(f, ...)
+    if ok then return a end
+end
+
+function I.LivePromptOpen()
+    if Ask("GetReadyCheckStatus", "player") == "waiting" then
+        local left = Ask("GetReadyCheckTimeLeft")
+        if type(left) ~= "number" or left > 0 then return true end
+    end
+    if Ask("GetLFGProposal") == true then return true end
+    if Ask("GetLFGRoleUpdate") == true then return true end
+    local ids = Ask("GetActiveLootRollIDs")
+    if type(ids) == "table" then
+        for _, id in ipairs(ids) do
+            local left = Ask("GetLootRollTimeLeft", id)
+            if type(left) == "number" and left > 0 then return true end
+        end
+    end
+    return false
+end
+
+-- Any prompt still open: seen by its events (expired ones are dropped), or
+-- reported by the client.
 function I.PromptOpen()
     local now, open = Now(), false
     for k, expires in pairs(st.prompts) do
         if expires <= now then st.prompts[k] = nil else open = true end
     end
-    return open
+    return open or I.LivePromptOpen()
 end
 
 -- "Reveal for a dialog": brings the game UI back (as above) and hands the

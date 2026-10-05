@@ -39,6 +39,8 @@
 --                          type meanwhile: Enter closes the edit box)
 --   /lsprobe taint         tainted fields of GameTooltip and the chat edit
 --                          boxes, and the chat globals: before and after one
+--   /lsprobe prompts       every return of the prompt getters the library
+--                          asks before hiding (a ready check waiting, then not)
 --   /lsprobe next          prints the /console line to type (a changing value)
 --   /lsprobe restore       puts every CVar this probe touched back
 --   /lsprobe log | clear
@@ -263,6 +265,29 @@ local function Taint()
     end
 end
 
+-- 8. The prompt getters the library asks before hiding the UI (in the dump by
+-- name only): log every return, so their shapes can be measured. Run it with
+-- a ready check waiting for your answer, and after answering.
+local function Prompts()
+    Log("== prompts: the client's own prompt state")
+    local function show(label, f, ...)
+        if type(f) ~= "function" then Log("  " .. label .. ": ABSENT"); return end
+        local r = { pcall(f, ...) }
+        local out = {}
+        for i = 2, #r do out[#out + 1] = tostring(r[i]) end
+        Log(("  %s -> %s%s"):format(label, r[1] and "" or "ERROR ", table.concat(out, ", ")))
+        return r[1] and r[2]
+    end
+    show('GetReadyCheckStatus("player")', GetReadyCheckStatus, "player")
+    show("GetReadyCheckTimeLeft()", GetReadyCheckTimeLeft)
+    show("GetLFGProposal()", GetLFGProposal)
+    show("GetLFGRoleUpdate()", GetLFGRoleUpdate)
+    local ids = show("GetActiveLootRollIDs()", GetActiveLootRollIDs)
+    if type(ids) == "table" then
+        for _, id in ipairs(ids) do show("GetLootRollTimeLeft(" .. tostring(id) .. ")", GetLootRollTimeLeft, id) end
+    end
+end
+
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 local function Rereg(how)
     Log("== rereg " .. tostring(how) .. ": unregister, then register the handler this way")
@@ -331,6 +356,7 @@ SlashCmdList.LSPROBE = function(msg)
             Show()
         end
     elseif cmd == "taint" then Taint()
+    elseif cmd == "prompts" then Prompts()
     elseif cmd == "testcvar" then TestCVar()
     elseif cmd == "rereg" then Rereg(arg)
     elseif cmd == "dialogs" then DialogTaint("now")
@@ -340,6 +366,6 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end

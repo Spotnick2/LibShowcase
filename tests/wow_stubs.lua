@@ -174,6 +174,9 @@ function WoW.reset()
     WoW.eventFrames = {}                            -- GetFramesRegisteredForEvent's answer
     WoW.chatOut = {}
     WoW.now = 1000                                  -- GetTime(); WoW.tick and WoW.advance move it
+    -- Prompts the client reports open, whatever events the library saw:
+    -- readyCheck = { status = "waiting", left = 30 }; lootRolls = { [rollID] = ms left }.
+    WoW.readyCheck, WoW.lfgProposal, WoW.roleCheck, WoW.lootRolls = nil, false, false, {}
 
     UIParent = newWidget("Frame", nil, "UIParent")
     WorldFrame = newWidget("Frame", nil, "WorldFrame")
@@ -283,6 +286,22 @@ strmatch = string.match   -- LibStub uses it
 function WoW.advance(seconds) WoW.now = WoW.now + seconds end
 
 function GetTime() return WoW.now end
+
+-- Prompt getters: in the dump by NAME only (the _G walk), no signature. The
+-- shapes are Retail's, UNMEASURED on Forever (/lsprobe prompts measures them).
+function GetReadyCheckStatus(unit)
+    return unit == "player" and WoW.readyCheck and WoW.readyCheck.status or nil
+end
+function GetReadyCheckTimeLeft() return WoW.readyCheck and WoW.readyCheck.left or 0 end
+function GetLFGProposal() return WoW.lfgProposal end
+function GetLFGRoleUpdate() return WoW.roleCheck end
+function GetActiveLootRollIDs()
+    local t = {}
+    for id in pairs(WoW.lootRolls) do t[#t + 1] = id end
+    table.sort(t)
+    return t
+end
+function GetLootRollTimeLeft(id) return WoW.lootRolls[id] or 0 end
 function InCombatLockdown() return WoW.inCombat end
 function IsLoggedIn() return WoW.loggedIn end
 function IsMounted() return WoW.mounted end

@@ -386,6 +386,29 @@ do
     check(SC:HideGameUI(win), "  its own time limit (35 s) ends it")
     SC:ForceRestore()
 
+    -- Started before the first copy of the library loaded (a load-on-demand
+    -- consumer): no start event was seen, so the client's getters decide.
+    local live = {
+        { "a ready check", function() WoW.readyCheck = { status = "waiting", left = 20 } end,
+          function() WoW.readyCheck = { status = "ready", left = 15 } end },
+        { "an LFG proposal", function() WoW.lfgProposal = true end, function() WoW.lfgProposal = false end },
+        { "an LFG role check", function() WoW.roleCheck = true end, function() WoW.roleCheck = false end },
+        { "a loot roll", function() WoW.lootRolls[42] = 45000 end, function() WoW.lootRolls[42] = 0 end },
+    }
+    for _, l in ipairs(live) do
+        l[2]()
+        local w = newWindow()
+        check(SC:Enter(w), l[1] .. " open before the library loaded: Enter presents")
+        check(UIParent:IsShown() and w:IsVisible(), "  with the UI, and the prompt, still up")
+        l[3]()
+        check(SC:HideGameUI(w), "  once the client reports it answered or gone, the UI hides")
+        SC:ForceRestore()
+    end
+    WoW.readyCheck = { status = "waiting", left = 0 }
+    check(SC:HideGameUI(), "a ready check still 'waiting' with no time left is over")
+    SC:RestoreGameUI()
+    WoW.readyCheck = nil
+
     -- Loot rolls by rollID; CANCEL_ALL_LOOT_ROLLS ends them all.
     WoW.fire("START_LOOT_ROLL", 1, 60000)
     WoW.fire("START_LOOT_ROLL", 2, 60000)
@@ -399,6 +422,22 @@ do
     WoW.fire("READY_CHECK", "Leader", 30)
     eq(#callsSince(mark), 0, "with no lease, a ready check makes no call")
     WoW.fire("READY_CHECK_FINISHED")
+end
+
+-- Codex's ordering: READY_CHECK fires before the FIRST copy loads (nobody
+-- listens yet), then the library loads and enters.
+do
+    WoW.reset()
+    WoW.resetLibStub()
+    WoW.readyCheck = { status = "waiting", left = 30 }
+    WoW.fire("READY_CHECK", "Leader", 30)
+    local lib = loadCopy(copyOf(), "LoadOnDemand")
+    local SC = lib:New({ owner = "LoD" })
+    local win = newWindow()
+    check(SC:Enter(win), "a ready check before the first load: Enter presents")
+    check(UIParent:IsShown() and not SC:IsGameUIHidden(), "  without hiding the open ready check")
+    eq(lib.state.prompts.ready, nil, "  (the event was never seen: the client's getters told)")
+    SC:ForceRestore()
 end
 
 -- HideGameUI, then Enter(window): the window still comes up above the UI.
