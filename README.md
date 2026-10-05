@@ -22,7 +22,7 @@ Embedded with LibStub; players don't install it separately.
 externals:
   Libs/LibShowcase-1.0:
     url: https://github.com/Spotnick2/LibShowcase
-    tag: r1
+    tag: r3
 
 ignore:
   # CurseForge's packager doesn't apply an external's own ignore list.
@@ -49,6 +49,8 @@ local Showcase = LibStub("LibShowcase-1.0"):New({
     onForcedExit = function(reason)         -- Esc/Alt+Z ("ui-shown"), combat, logout, zoning
         if reason == "ui-shown" then MyWindow:Hide() end
     end,
+    onGameUIShown = function(reason)        -- "dialog": a Blizzard dialog brought the UI back;
+    end,                                    -- the presentation and your window stay
 })
 
 MyWindow:SetScript("OnShow", function(self) Showcase:Enter(self) end)   -- true, or false + reason
@@ -57,6 +59,14 @@ MyWindow:SetScript("OnHide", function() Showcase:Exit("closed") end)
 
 `Enter` answers `false, "combat" | "unsupported" | "busy"`: `busy` means another addon holds the
 showcase (the camera is global, so there is one owner at a time).
+
+**Blizzard dialogs:** the library never shows or touches a StaticPopup (an addon that does taints
+Blizzard's shared dialog frames, and the player's Quit or accept-invite buttons then fail:
+measured on 70205). When one appears while your window has the UI hidden, the library brings the
+UI back and keeps the presentation running (so do a ready check, a dungeon proposal or a loot
+roll). If a dialog is already up at `Enter`, the UI simply stays up: check `IsGameUIHidden()`.
+Never call `StaticPopup_Show` for your own prompts:
+use your own frames. `Lift` is for your own frames only.
 
 The full API, the options and the guarantees are in `docs/DESIGN.md`.
 

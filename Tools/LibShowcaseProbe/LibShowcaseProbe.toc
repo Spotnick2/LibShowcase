@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: LibShowcase Probe
+## Notes: In-game measurement probe for LibShowcase-1.0 (docs/DESIGN.md, Open measurements). Never shipped: lives under Tools/, which every consumer's .pkgmeta ignores.
+## Author: Spotnick
+## Version: dev
+## SavedVariables: LibShowcaseProbeDB
+
+Libs\LibShowcase-1.0\LibShowcase-1.0.xml
+Probe.lua
