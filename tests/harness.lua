@@ -31,19 +31,23 @@ end
 
 -- The Lua files LibShowcase-1.0.xml loads, in order. Read from the XML itself,
 -- so the tests load exactly what the client loads.
-function xmlScripts()
-    local xml = readFile("LibShowcase-1.0.xml"):gsub("<!%-%-.-%-%->", "")   -- listed in a comment is not loaded
+function xmlScripts(xmlPath)
+    local xml = readFile(xmlPath or "LibShowcase-1.0.xml"):gsub("<!%-%-.-%-%->", "")   -- listed in a comment is not loaded
     local files = {}
     for file in xml:gmatch('<Script%s+file="([^"]+)"') do files[#files + 1] = (file:gsub("\\", "/")) end
     return files
 end
 
+-- LF, whatever the checkout has: a Windows clone with core.autocrlf gets
+-- CRLF, and synthetic()'s substitutions are written with "\n".
+local function readSource(path)
+    return (readFile(path):gsub("\r\n", "\n"))
+end
+
 local function source(file)
     local mutant = os.getenv("LIBSHOWCASE_MUTANT")
     if mutant and mutant ~= "" and file == "LibShowcase.lua" then file = mutant end
-    -- LF, whatever the checkout has: a Windows clone with core.autocrlf gets
-    -- CRLF, and synthetic()'s substitutions are written with "\n".
-    return (readFile(file):gsub("\r\n", "\n"))
+    return readSource(file)
 end
 
 -- One copy of the library: { { name, src } }, every file the XML lists.
@@ -67,6 +71,17 @@ function loadCopy(copy, host)
         chunk(host, ns)
     end
     return LibStub("LibShowcase-1.0")
+end
+
+-- A released copy, whole: `dir` (tests/fixtures/LibShowcase-rN) holds the
+-- tag's XML and every file it lists, byte for byte, loaded in ITS order.
+-- Never the checkout's files (a mutant included).
+function releasedCopy(dir)
+    local copy = {}
+    for _, file in ipairs(xmlScripts(dir .. "/LibShowcase-1.0.xml")) do
+        copy[#copy + 1] = { name = file, src = readSource(dir .. "/" .. file) }
+    end
+    return copy
 end
 
 -- A fresh client with this checkout embedded in `host`.
