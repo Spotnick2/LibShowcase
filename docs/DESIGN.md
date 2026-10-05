@@ -24,9 +24,9 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 | `SC:ForceRestore(reason?)` | Everything back now. |
 | `SC:IsActive()` / `SC:IsOwner()` | This instance's presentation is running / holds the lease. |
 | `SC:Acquire()` / `SC:Release()` | Hold the lease without a camera (a camera-OFF consumer); `Release` restores everything first. |
-| `SC:HideGameUI(anchor?)` / `SC:RestoreGameUI()` | `SetUIVisibility(false/true)`, lifting `anchor` and GameTooltip. Restoring drops every lift. |
+| `SC:HideGameUI(anchor?)` / `SC:RestoreGameUI()` | `SetUIVisibility(false/true)`, lifting `anchor` and GameTooltip. Restoring drops every lift. `HideGameUI` returns `false, "combat" \| "unsupported" \| "busy" \| "dialog"` (a Blizzard dialog is up: the UI stays up). With the UI already hidden, it only lifts `anchor`. `Enter` hides the UI the same way, and presents with the UI up when it can't (check `IsGameUIHidden()`). |
 | `SC:IsGameUIHidden()` | Whether the library has the UI hidden (shared truth, any owner). |
-| `SC:Lift(frame, strata?)` / `SC:Drop(frame)` / `SC:IsLifted(frame)` | Take one of the consumer's **own** frames out from under UIParent (scale compensated, idempotent) and put it back. Never a Blizzard frame (a StaticPopup above all: see Blizzard dialogs). |
+| `SC:Lift(frame, strata?)` / `SC:Drop(frame)` / `SC:IsLifted(frame)` | Take one of the consumer's **own** frames out from under UIParent (scale compensated, idempotent) and put it back. Never a Blizzard frame (a StaticPopup above all: see Blizzard dialogs). The library itself lifts GameTooltip, inherited from AltStable; whether that taints is an open measurement. |
 | `SC:LiftPopup(dialog)` | "Reveal for a dialog": while this instance holds the lease with the UI hidden, brings the game UI back as a dialog appearing does (Guarantees). Returns the dialog **untouched**; does nothing otherwise. |
 | `SC:DropPopup(dialog)` | A no-op, kept for API stability. |
 
@@ -89,6 +89,8 @@ owner.
 - **Escape/Alt+Z** with the UI hidden: a `hooksecurefunc("SetUIVisibility")` hook calls
   `onForcedExit("ui-shown")`; if the consumer does not exit, the library does.
 - **Logout, loading screens:** `PLAYER_LOGOUT` and `PLAYER_ENTERING_WORLD` restore everything.
+  Combat, logout and loading screens leave an **idle** `Acquire` lease alone (nothing hidden,
+  lifted or presenting): no call, no `onForcedExit`.
 - **Blizzard dialogs are never touched.** The library never calls `StaticPopup_Show` and never
   calls `SetParent`, `SetFrameStrata`, `HookScript` (or anything else) on a StaticPopup or
   StaticPopupSpecial frame. MEASURED 70205: the probe's old `/lsprobe popup` called `StaticPopup_Show("LSPROBE_TEST")` from addon code, then `SC:LiftPopup(dialog)` (`SetParent(nil)`, `SetFrameStrata`, `HookScript("OnHide")` on the dialog frame); the player's later Quit dialog failed with `[ADDON_ACTION_FORBIDDEN] AddOn 'LibShowcaseProbe' tried to call the protected function 'ForceQuit()'` (`StaticPopup_OnClick` -> `OnAccept`). StaticPopup frames are a pool shared with Blizzard's secure code: touching one taints it, and protected buttons (accept a guild invite, Quit, Logout) then fail.
@@ -102,6 +104,12 @@ owner.
   `onGameUIShown("dialog")`. The dialog shows where Blizzard put it. A dialog with the UI up, under
   the player's own Alt+Z, or with no lease changes nothing. (A lease taken implicitly by
   `HideGameUI` alone is given back, as always once nothing is left to restore.)
+  **Prompts that are not StaticPopups** (each its own frame under UIParent) do the same through
+  their events, which the library listens to (touching nothing): `READY_CHECK`,
+  `LFG_PROPOSAL_SHOW`, `LFG_ROLE_CHECK_SHOW`, `ROLE_POLL_BEGIN`, `PVP_ROLE_POPUP_SHOW`,
+  `START_LOOT_ROLL` (all in the 70205 dump). **A StaticPopup already up** when the UI would be
+  hidden keeps it up: its Show already happened, so nothing would bring it back (`HideGameUI`
+  returns `false, "dialog"`; `Enter` presents with the UI up).
   MEASURED 70205 (`/lsprobe invite`): a real party invite while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held), the `PARTY_INVITE` dialog's
   `which` read secure (`issecurevariable`), accepting it worked, and the later `QUIT` dialog was
@@ -110,9 +118,16 @@ owner.
   `SC:Lift` is for the consumer's own frames, never a Blizzard one.
 - **Crash self-heal:** `Enter` writes the capture (view slot, zoom, every CVar it changes, the
   pitch limit, the zoom cap) into `db.LibShowcaseCapture`; a restore clears it; a capture still
-  there at `PLAYER_LOGIN` (or at `New`, after login) is restored. MEASURED 70205:
-  `CameraKeepCharacterCentered` keeps a changed value across a `/reload`, so this matters.
-- **A CVar the client lacks is never created**, on the way in or out.
+  there at `PLAYER_LOGIN` (or at `New`, after login, or at that instance's next `Enter`, before
+  it captures) is restored. MEASURED 70205: `CameraKeepCharacterCentered` keeps a changed value
+  across a `/reload`. **Limit:** the client writes SavedVariables only at a logout or a
+  `/reload`, and both fire `PLAYER_LOGOUT`, whose restore clears the capture first. So after a
+  real crash the file on disk holds no capture and nothing is healed. (Whether the changed CVars
+  themselves survive a crash, given that Config.wtf is also written on exit, is not measured.)
+  The heal covers a `PLAYER_LOGOUT` restore that failed, and costs nothing otherwise.
+- **A CVar the client lacks is never created**, on the way in or out: the centring CVars,
+  `test_cameraOverShoulder` (a cast reset included), `cameraDistanceMaxZoomFactor` and the extras
+  are captured only when `GetCVar` returns a value, and only captured ones are written.
 - **The experimental-CVar popup** is suppressed before each `test_*` write with
   `GameEvent.UnregisterInternalEvent` (MEASURED 70205: callable, no ADDON_ACTION_BLOCKED, no popup)
   and **never given back**: it stays off until the next `/reload`, so a later `test_*` write (the
@@ -137,7 +152,7 @@ methods in `lib.methods` (a plain table, the instances' `__index`) dispatch to `
 time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer callbacks; every table keeps its
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
-newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (65 mutations, all red).
+newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (75 mutations, all red).
 
 ## Deliberate differences from AltStable's block
 
@@ -152,6 +167,10 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (65 muta
 - Popup suppression through `GameEvent` (AltStable's frame walk did nothing on 70205); like
   AltStable, never given back (Guarantees).
 - Events and the hook stay active whenever the lease is held, not only while the camera runs.
+- A Blizzard dialog already up keeps the UI up; ready checks, LFG proposals, role checks and loot
+  rolls bring it back (AltStable lifted only its StaticPopups).
+- A CVar the client lacks is never created (AltStable wrote `test_cameraOverShoulder` and the zoom
+  cap regardless; `tests/test_parity.lua` runs on a client that has them).
 - Combat, logout and zoning also call `onForcedExit`.
 - The `UnitBuff` mount-icon scan is gone: `UnitBuff` is absent from the 70205 API dump, so it
   never ran on Forever.
@@ -163,6 +182,8 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (65 muta
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
+| Does lifting GameTooltip (`SetParent(nil)`, `SetFrameStrata`, `SetScale`, then back) taint it? | `/lsprobe taint`, `/lsprobe show`, Escape, `/lsprobe taint` |
+| Does closing an open chat edit box (`ChatEdit_DeactivateChat` from addon code) taint the edit box or `ACTIVE_CHAT_EDIT_BOX`? | `/lsprobe taint`, `/lsprobe show 5` (open chat and type meanwhile), Escape, `/lsprobe taint` |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
 securely (`issecurevariable`), and `/lsprobe focus` lists the tainted fields of the frame under the

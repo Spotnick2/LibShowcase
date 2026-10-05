@@ -43,7 +43,10 @@ local M = {
     { "the shared state replaced", { { "lib.state = lib.state or {}", "lib.state = {}" } } },
     { "the instance registry replaced", { { "lib.instances = lib.instances or {}", "lib.instances = {}" } } },
     { "the frames rebuilt", { { "if not lib.animFrame then", "if true then" } } },
-    { "events registered again", { { "    if not lib.events[ev] then\n", "    if true then\n" } } },
+    { "events registered again", { { "    if not lib.events[ev] then\n        lib.events[ev] = true\n        lib.eventFrame:RegisterEvent(ev)",
+                                     "    if true then\n        lib.events[ev] = true\n        lib.eventFrame:RegisterEvent(ev)" } } },
+    { "reveal events registered again", { { "    if not lib.events[ev] then\n        lib.events[ev] = true\n        pcall(",
+                                            "    if true then\n        lib.events[ev] = true\n        pcall(" } } },
     { "the hook installed again", { { "if not lib.hooked.SetUIVisibility and type(hooksecurefunc)", "if type(hooksecurefunc)" } } },
     { "the dialog hook installed again", { { "if not lib.hooked.StaticPopup_Show and ", "if " } } },
     { "the special-dialog hook installed again", { { "if not lib.hooked.StaticPopupSpecial_Show and ", "if " } } },
@@ -114,6 +117,21 @@ local M = {
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
     { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false\n", "" } } },
+    -- Review fixes (#4)
+    { "a hidden UI does not lift the anchor", {
+        { "        if anchor then I.Lift(inst, anchor, strata) end\n        return true\n", "        return true\n" } } },
+    { "a dialog already up is hidden with the UI", {
+        { '    if I.AnyDialogShown(false) then return false, "dialog" end\n', "" } } },
+    { "the reveal events ignored", { { "    if IS_REVEAL_EVENT[event] then\n", "    if false then\n" } } },
+    { "the reveal events not registered", {
+        { "        pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, ev)\n", "" } } },
+    { "a missing shoulder CVar is created", {
+        { "        if shoulder ~= nil then capture.shoulderOffset", "        if true then capture.shoulderOffset" } } },
+    { "a cast reset writes a missing shoulder CVar", {
+        { "    if not (cam.capture and cam.capture.shoulderOffset) then return nil end\n", "" } } },
+    { "a missing zoom cap is created", { { "        if cap ~= nil then\n", "        if true then\n" } } },
+    { "no heal before the capture", { { "    I.Heal(inst)\n\n    local cfg = I.Config(inst)", "    local cfg = I.Config(inst)" } } },
+    { "an idle lease restored on combat", { { "        if I.Idle() then return end\n", "" } } },
     -- Self-heal
     { "the capture not written to the db", { { "    if db then db[lib.DB_KEY] = capture end\n", "" } } },
     { "the capture left in the db", { { "        if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end\n", "" } } },

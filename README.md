@@ -22,7 +22,7 @@ Embedded with LibStub; players don't install it separately.
 externals:
   Libs/LibShowcase-1.0:
     url: https://github.com/Spotnick2/LibShowcase
-    tag: r1
+    tag: r3
 
 ignore:
   # CurseForge's packager doesn't apply an external's own ignore list.
@@ -63,7 +63,9 @@ showcase (the camera is global, so there is one owner at a time).
 **Blizzard dialogs:** the library never shows or touches a StaticPopup (an addon that does taints
 Blizzard's shared dialog frames, and the player's Quit or accept-invite buttons then fail:
 measured on 70205). When one appears while your window has the UI hidden, the library brings the
-UI back and keeps the presentation running. Never call `StaticPopup_Show` for your own prompts:
+UI back and keeps the presentation running (so do a ready check, a dungeon proposal or a loot
+roll). If a dialog is already up at `Enter`, the UI simply stays up: check `IsGameUIHidden()`.
+Never call `StaticPopup_Show` for your own prompts:
 use your own frames. `Lift` is for your own frames only.
 
 The full API, the options and the guarantees are in `docs/DESIGN.md`.

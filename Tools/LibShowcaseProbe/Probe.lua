@@ -35,6 +35,10 @@
 --   /lsprobe focus         3 s later: the frame under the mouse and its
 --                          parents, with every field written tainted (for a
 --                          dialog that does not come from StaticPopup_Show)
+--   /lsprobe show N        the presentation after N seconds (open chat and
+--                          type meanwhile: Enter closes the edit box)
+--   /lsprobe taint         tainted fields of GameTooltip and the chat edit
+--                          boxes, and the chat globals: before and after one
 --   /lsprobe next          prints the /console line to type (a changing value)
 --   /lsprobe restore       puts every CVar this probe touched back
 --   /lsprobe log | clear
@@ -215,6 +219,19 @@ local function DialogTaint(tag)
     if n == 0 then Log(("  [%s] no shown dialog found"):format(tag)) end
 end
 
+-- Every field of a frame written tainted, and by which addon. Only reads.
+local function ScanFrame(f, label)
+    local name = label or (f.GetDebugName and f:GetDebugName()) or (f.GetName and f:GetName()) or tostring(f)
+    local secure, tainted = 0, {}
+    for k in pairs(f) do
+        local ok, sec, by = pcall(issecurevariable, f, k)
+        if ok and sec then secure = secure + 1
+        elseif ok then tainted[#tainted + 1] = tostring(k) .. " (" .. tostring(by) .. ")" end
+    end
+    Log(("  %s shown=%s: %d fields secure, tainted: %s"):format(name, tostring(f.IsShown and f:IsShown()),
+        secure, #tainted > 0 and table.concat(tainted, ", ") or "none"))
+end
+
 -- Any dialog, whatever shows it: 3 s after the command, the frame under the
 -- mouse and its parents are named, and every field written tainted is listed.
 local function Focus()
@@ -224,18 +241,26 @@ local function Focus()
         local f = foci[1]
         if not f then Log("  nothing under the mouse"); return end
         while f and f ~= UIParent do
-            local name = f.GetDebugName and f:GetDebugName() or (f.GetName and f:GetName()) or tostring(f)
-            local secure, tainted = 0, {}
-            for k in pairs(f) do
-                local ok, sec, by = pcall(issecurevariable, f, k)
-                if ok and sec then secure = secure + 1
-                elseif ok then tainted[#tainted + 1] = tostring(k) .. " (" .. tostring(by) .. ")" end
-            end
-            Log(("  %s shown=%s: %d fields secure, tainted: %s"):format(name, tostring(f:IsShown()),
-                secure, #tainted > 0 and table.concat(tainted, ", ") or "none"))
+            ScanFrame(f)
             f = f.GetParent and f:GetParent()
         end
     end)
+end
+
+-- 7. What a presentation leaves tainted (#4 review): the library lifts
+-- GameTooltip (SetParent/SetFrameStrata/SetScale) and closes an open chat
+-- edit box (ChatEdit_DeactivateChat). Read before and after a presentation.
+local function Taint()
+    Log("== taint: GameTooltip, the chat edit boxes, the chat globals")
+    ScanFrame(GameTooltip, "GameTooltip")
+    for i = 1, (NUM_CHAT_WINDOWS or 10) do
+        local eb = _G["ChatFrame" .. i .. "EditBox"]
+        if eb then ScanFrame(eb, "ChatFrame" .. i .. "EditBox") end
+    end
+    for _, g in ipairs({ "ACTIVE_CHAT_EDIT_BOX", "LAST_ACTIVE_CHAT_EDIT_BOX" }) do
+        local sec, by = issecurevariable(g)
+        Log(("  %s: %s"):format(g, sec and "secure" or ("TAINTED by " .. tostring(by))))
+    end
 end
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
@@ -297,7 +322,15 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "nudge" then Nudge(arg)
     elseif cmd == "combat" then Combat()
     elseif cmd == "invite" then Invite()
-    elseif cmd == "show" then Show()
+    elseif cmd == "show" then
+        local delay = tonumber(arg)
+        if delay then
+            Log(("== show in %d s: open chat and start typing (don't send)"):format(delay))
+            C_Timer.After(delay, Show)
+        else
+            Show()
+        end
+    elseif cmd == "taint" then Taint()
     elseif cmd == "testcvar" then TestCVar()
     elseif cmd == "rereg" then Rereg(arg)
     elseif cmd == "dialogs" then DialogTaint("now")
@@ -307,6 +340,6 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end

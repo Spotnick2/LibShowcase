@@ -417,9 +417,19 @@ end
 -- is not protected. Bails in combat; every restore path brings it back.
 
 function I.HideUI(inst, anchor)
-    if st.uiHidden then return true end
+    local strata = (st.cam.cfg and st.cam.cfg.anchorStrata) or inst.opts.anchorStrata or "DIALOG"
+    if st.uiHidden then
+        -- Already hidden (HideGameUI, then Enter(window)): the window still
+        -- has to come up above it.
+        if anchor then I.Lift(inst, anchor, strata) end
+        return true
+    end
     if InCombat() then return false, "combat" end
     if type(SetUIVisibility) ~= "function" then return false, "unsupported" end
+    -- A Blizzard dialog already up (an invite, a summon) would vanish with the
+    -- UI and nothing would bring it back: its Show already happened. Leave
+    -- the UI up, as a dialog appearing later brings it back.
+    if I.AnyDialogShown(false) then return false, "dialog" end
 
     -- Close an open chat edit box: hidden mid-input and shown again, it comes
     -- back half-focused and un-closable.
@@ -435,7 +445,7 @@ function I.HideUI(inst, anchor)
         end
     end
 
-    if anchor then I.Lift(inst, anchor, (st.cam.cfg and st.cam.cfg.anchorStrata) or inst.opts.anchorStrata or "DIALOG") end
+    if anchor then I.Lift(inst, anchor, strata) end
     -- GameTooltip too, so every SetOwner/AddLine keeps working; TOOLTIP draws
     -- above the window.
     if GameTooltip then I.Lift(inst, GameTooltip, "TOOLTIP") end
@@ -484,18 +494,21 @@ end
 -- dialog failed: ADDON_ACTION_FORBIDDEN, ForceQuit() from StaticPopup_OnClick.
 --
 -- So a dialog that appears while the library has the game UI hidden (a guild
--- or party invite, a summon, a ready check) brings the UI back, and the dialog
--- shows where Blizzard put it, untouched. The presentation goes on: camera,
--- lease, the consumer's window (back under the shown UIParent). Post-hooks
--- (hooksecurefunc) on StaticPopup_Show and StaticPopupSpecial_Show notice it;
--- a post-hook leaves Blizzard's own call secure.
+-- or party invite, a summon; a ready check, a loot roll: REVEAL_EVENTS below)
+-- brings the UI back, and the dialog shows where Blizzard put it, untouched.
+-- The presentation goes on: camera, lease, the consumer's window (back under
+-- the shown UIParent). Post-hooks (hooksecurefunc) on StaticPopup_Show and
+-- StaticPopupSpecial_Show notice it; a post-hook leaves Blizzard's own call
+-- secure. A StaticPopup already up keeps the UI from being hidden (HideUI).
 
 -- StaticPopup_Show returns nil when it refuses (a show condition), and a hook
 -- does not see the return: ask the shown list instead (Blizzard_StaticPopup's
 -- StaticPopup_SetUpPosition inserts the dialog there before it calls Show).
-function I.AnyDialogShown()
+-- `unknown` is the answer when the client has no such list (default true:
+-- the hook then trusts the Show it just saw). Only reads.
+function I.AnyDialogShown(unknown)
     local each = rawget(_G, "StaticPopup_ForEachShownDialog")
-    if type(each) ~= "function" then return true end
+    if type(each) ~= "function" then return unknown ~= false end
     local any = false
     pcall(each, function() any = true end)
     return any
@@ -522,6 +535,17 @@ end
 function I.OnStaticPopupSpecialShow()
     I.RevealForDialog("dialog")
 end
+
+-- Prompts Blizzard shows WITHOUT StaticPopup_Show, each its own frame under
+-- UIParent: a ready check, a dungeon-finder proposal or role check, a role
+-- poll, a PvP role popup, a loot roll. Their events (all in the 70205 dump)
+-- bring the UI back the same way; listening to an event touches nothing.
+local REVEAL_EVENTS = {
+    "READY_CHECK", "LFG_PROPOSAL_SHOW", "LFG_ROLE_CHECK_SHOW", "ROLE_POLL_BEGIN",
+    "PVP_ROLE_POPUP_SHOW", "START_LOOT_ROLL",
+}
+local IS_REVEAL_EVENT = {}
+for _, ev in ipairs(REVEAL_EVENTS) do IS_REVEAL_EVENT[ev] = true end
 
 -- "Reveal for a dialog": brings the game UI back (as above) and hands the
 -- dialog back UNTOUCHED. Does nothing when the UI is up or the caller does
@@ -703,7 +727,9 @@ function I.PlayerShoulderOffset(cfg, zoom)
 end
 
 -- Write the presentation's CVars (Enter, and again after a cast reset).
+-- Nothing when the client lacks the CVar (no shoulderOffset was captured).
 function I.WriteShoulder(cam)
+    if not (cam.capture and cam.capture.shoulderOffset) then return nil end
     local desired = I.PlayerShoulderOffset(cam.cfg, cam.enterToZoom)
     I.SuppressExperimentalCVarPopup()
     pcall(SetCVar, "test_cameraOverShoulder", desired)
@@ -737,6 +763,11 @@ function I.Enter(inst, anchor)
     if not I.IsSupported() then return false, "unsupported" end
     if not I.Claim(inst) then return false, "busy" end
 
+    -- A capture an earlier session left in this db (not healed at New: another
+    -- instance was presenting then) goes back first; otherwise the capture
+    -- below would take that session's changed camera for the player's.
+    I.Heal(inst)
+
     local cfg = I.Config(inst)
     local capture = { savedViewSlot = cfg.savedViewSlot, zoom = tonumber(GetCameraZoom()) or 0 }
     pcall(SaveView, capture.savedViewSlot)
@@ -756,9 +787,13 @@ function I.Enter(inst, anchor)
 
     if type(GetCVar) == "function" and type(SetCVar) == "function" then
         -- Lift the zoom-out cap so a mounted preset can reach its target.
-        capture.cameraDistanceMaxZoomFactor = tonumber(GetCVar("cameraDistanceMaxZoomFactor")) or 1.0
-        if capture.cameraDistanceMaxZoomFactor < 2.0 then
-            pcall(SetCVar, "cameraDistanceMaxZoomFactor", 2.0)
+        -- (nil: the client lacks the CVar; writing it would create it.)
+        local cap = GetCVar("cameraDistanceMaxZoomFactor")
+        if cap ~= nil then
+            capture.cameraDistanceMaxZoomFactor = tonumber(cap) or 1.0
+            if capture.cameraDistanceMaxZoomFactor < 2.0 then
+                pcall(SetCVar, "cameraDistanceMaxZoomFactor", 2.0)
+            end
         end
     end
 
@@ -774,7 +809,8 @@ function I.Enter(inst, anchor)
                 pcall(SetCVar, cvar, "0")
             end
         end
-        capture.shoulderOffset = tonumber(GetCVar("test_cameraOverShoulder")) or 0
+        local shoulder = GetCVar("test_cameraOverShoulder")
+        if shoulder ~= nil then capture.shoulderOffset = tonumber(shoulder) or 0 end
         local desired = I.WriteShoulder(cam)
 
         if cfg.viewBlendStyle then capture.viewBlendStyle = GetCVar("cameraViewBlendStyle") end
@@ -786,8 +822,9 @@ function I.Enter(inst, anchor)
             after[#after + 1] = cvar:gsub("^Camera", "") .. "=" .. tostring(GetCVar(cvar))
                 .. " (was " .. tostring(capture[cvar]) .. ")"
         end
-        I.Debug(inst, string.format("shoulder: from=%.3f to=%.3f  %s",
-            capture.shoulderOffset, desired, table.concat(after, " ")))
+        local function n(v) return v and string.format("%.3f", v) or "absent" end
+        I.Debug(inst, string.format("shoulder: from=%s to=%s  %s",
+            n(capture.shoulderOffset), n(desired), table.concat(after, " ")))
     end
     if cfg.pitchLimit and type(ConsoleExec) == "function" then
         capture.pitchLimit = true
@@ -1029,6 +1066,10 @@ function I.Heal(inst)
 end
 
 function I.OnEvent(event, ...)
+    if IS_REVEAL_EVENT[event] then
+        I.RevealForDialog("dialog")
+        return
+    end
     if event == "PLAYER_LOGIN" then
         I.InstallDialogHooks()
         for _, inst in ipairs(lib.instances) do I.Heal(inst) end
@@ -1047,6 +1088,8 @@ function I.OnEvent(event, ...)
         -- moment: restore synchronously, here.
         local inst = st.owner
         if not inst then return end
+        -- An idle Acquire lease: nothing to put back, no exit to report.
+        if I.Idle() then return end
         I.Restore(inst, event)
         I.Notify(inst, event == "PLAYER_REGEN_DISABLED" and "combat"
             or event == "PLAYER_LOGOUT" and "logout" or "loading")
@@ -1095,6 +1138,13 @@ for _, ev in ipairs({ "PLAYER_LOGIN", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENA
     if not lib.events[ev] then
         lib.events[ev] = true
         lib.eventFrame:RegisterEvent(ev)
+    end
+end
+-- pcall: a client without one of these events must not stop the load.
+for _, ev in ipairs(REVEAL_EVENTS) do
+    if not lib.events[ev] then
+        lib.events[ev] = true
+        pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, ev)
     end
 end
 if not lib.hooked.SetUIVisibility and type(hooksecurefunc) == "function" and type(SetUIVisibility) == "function" then

@@ -5,7 +5,7 @@
             externals:
               Libs/LibShowcase-1.0:
                 url: https://github.com/Spotnick2/LibShowcase
-                tag: r1
+                tag: r3
 
         and then loaded from that addon's TOC before any of its own files:
 

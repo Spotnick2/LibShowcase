@@ -310,6 +310,83 @@ do
     check(not lib.state.owner, "and no lease taken")
 end
 
+-- A dialog already up when the UI would be hidden: its Show already happened,
+-- so nothing would bring it back. The UI stays up; the camera still presents.
+do
+    local lib = freshLibrary()
+    local shown = {}
+    local SC = lib:New({ owner = "A", onGameUIShown = function(r) shown[#shown + 1] = r end })
+    local d = StaticPopup_Show("PARTY_INVITE")
+    local win = newWindow()
+    check(SC:Enter(win), "Enter with a dialog up still presents")
+    check(SC:IsActive(), "  the camera runs")
+    check(UIParent:IsShown() and d:IsVisible(), "  but the UI, and the dialog, stay up")
+    eq(win:GetParent(), UIParent, "  the window is not lifted")
+    check(not SC:IsGameUIHidden(), "  and the library knows the UI is up")
+    eq(#shown, 0, "  nothing was hidden, so no onGameUIShown")
+    untouched(d, "a dialog up at Enter")
+    SC:ForceRestore()
+    local ok, why = SC:HideGameUI(win)
+    check(ok == false and why == "dialog", "HideGameUI refuses: false, \"dialog\"")
+    check(not SC:IsOwner(), "  and takes no lease")
+    WoW.closeDialog(d)
+    check(SC:HideGameUI(win), "once the dialog is closed, the UI hides")
+    SC:RestoreGameUI()
+end
+
+-- Prompts that are not StaticPopups (a ready check, a dungeon proposal, a
+-- loot roll, ...) bring the UI back through their events.
+do
+    local lib = freshLibrary()
+    local shown, forced = {}, {}
+    local SC = lib:New({ owner = "A",
+        onGameUIShown = function(r) shown[#shown + 1] = r end,
+        onForcedExit = function(r) forced[#forced + 1] = r end })
+    for i, ev in ipairs({ "READY_CHECK", "LFG_PROPOSAL_SHOW", "LFG_ROLE_CHECK_SHOW", "ROLE_POLL_BEGIN",
+                          "PVP_ROLE_POPUP_SHOW", "START_LOOT_ROLL" }) do
+        local win = newWindow()
+        SC:Enter(win)
+        check(not UIParent:IsShown(), ev .. ": presenting with the UI hidden")
+        WoW.fire(ev, 1, 60)
+        check(UIParent:IsShown(), ev .. " brings the UI back")
+        check(SC:IsActive() and SC:IsOwner(), "  presentation and lease kept")
+        check(#shown == i and shown[i] == "dialog", "  onGameUIShown(\"dialog\"), once")
+        SC:ForceRestore()
+    end
+    eq(#forced, 0, "none is read as Escape/Alt+Z")
+    local mark = #WoW.calls
+    WoW.fire("READY_CHECK", "Leader", 30)
+    eq(#callsSince(mark), 0, "with no lease, a ready check makes no call")
+end
+
+-- HideGameUI, then Enter(window): the window still comes up above the UI.
+do
+    local lib = freshLibrary()
+    local SC = lib:New({ owner = "A" })
+    local win = newWindow()
+    check(SC:HideGameUI(), "the UI hidden with no window")
+    check(SC:Enter(win), "then Enter(window)")
+    check(win:IsVisible() and win:GetParent() == nil, "  the window is lifted above the hidden UI")
+    SC:ForceRestore()
+    eq(win:GetParent(), UIParent, "  and put back on restore")
+end
+
+-- An idle Acquire lease: combat, logout and loading screens have nothing to
+-- restore and no exit to report.
+do
+    local lib = freshLibrary()
+    local forced = {}
+    local SC = lib:New({ owner = "A", onForcedExit = function(r) forced[#forced + 1] = r end })
+    check(SC:Acquire(), "an idle Acquire lease")
+    local mark = #WoW.calls
+    WoW.enterCombat(); WoW.leaveCombat()
+    WoW.fire("PLAYER_ENTERING_WORLD")
+    eq(#callsSince(mark), 0, "combat and a loading screen make no call (no MoveView*Stop)")
+    eq(#forced, 0, "  and report no forced exit")
+    check(SC:IsOwner(), "  the lease stays")
+    SC:Release()
+end
+
 -- Camera OFF (Acquire + HideGameUI): the UI comes back, the lease stays.
 do
     local lib = freshLibrary()
@@ -377,6 +454,23 @@ do
     lib:New({ owner = "LoD", db = DB3 })
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "created after login: healed at once")
     eq(DB3.LibShowcaseCapture, nil, "  (db given as a table works too)")
+
+    -- Created after login WHILE another addon presents: not healed then (the
+    -- camera is A's); healed at its own Enter, before the capture, so the
+    -- capture holds the player's value and not the crash's.
+    lib = freshLibrary()
+    WoW.loggedIn = true
+    local A = lib:New({ owner = "A" })
+    check(A:Enter(newWindow()), "A presents")
+    local DB4 = { LibShowcaseCapture = { CameraKeepCharacterCentered = "1" } }
+    local B = lib:New({ owner = "B", db = DB4 })
+    check(DB4.LibShowcaseCapture ~= nil, "B created while A presents: not healed yet")
+    A:ForceRestore()
+    WoW.cvars.CameraKeepCharacterCentered = "0"    -- the crash's value, still in place
+    check(B:Enter(newWindow()), "B presents")
+    eq(DB4.LibShowcaseCapture.CameraKeepCharacterCentered, "1", "  healed first: its capture holds the player's value")
+    B:ForceRestore()
+    eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  so its restore puts the player's value back")
 end
 
 done("test_lease")

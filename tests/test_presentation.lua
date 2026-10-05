@@ -87,6 +87,19 @@ do
     eq(WoW.cvars.CameraKeepCharacterCentered, nil, "nor on the way out")
     eq(WoW.cvars.CameraReduceUnexpectedMovement, nil, "nor the other")
 end
+do
+    local lib = freshLibrary()
+    local SC = lib:New({ owner = "A", castAware = true })
+    WoW.cvars.test_cameraOverShoulder = nil
+    WoW.cvars.cameraDistanceMaxZoomFactor = nil
+    check(SC:Enter(newWindow()), "enters without the shoulder CVar and the zoom cap")
+    WoW.fire("UNIT_SPELLCAST_START", "player")      -- a cast reset writes the shoulder again
+    eq(WoW.cvars.test_cameraOverShoulder, nil, "  creates no shoulder CVar, a cast reset included")
+    eq(WoW.cvars.cameraDistanceMaxZoomFactor, nil, "  nor the zoom cap")
+    SC:ForceRestore("test")
+    eq(WoW.cvars.test_cameraOverShoulder, nil, "nor on the way out")
+    eq(WoW.cvars.cameraDistanceMaxZoomFactor, nil, "  either of them")
+end
 
 ------------------------------------------------------------------------------
 -- Reopened during the exit animation: a real, fresh entry.
