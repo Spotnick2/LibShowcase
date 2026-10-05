@@ -19,9 +19,23 @@
 --                          a Blizzard dialog itself.
 --   /lsprobe show          the full presentation on a small probe window
 --                          (Escape or /lsprobe show again to close); after it
---                          closes, /lsprobe testcvar checks the popup is back
---   /lsprobe testcvar      writes test_cameraOverShoulder = 0 with nothing
---                          suppressed: does the experimental popup appear?
+--                          closes, the /console line printed must raise NO
+--                          popup (r3 never gives it back: re-registering taints)
+--   /lsprobe testcvar      writes test_cameraOverShoulder from ADDON code
+--                          (not a clean trigger: prefer the /console line)
+--   /lsprobe rereg closure|direct|none
+--                          re-registers the experimental-CVar handler as the
+--                          library does (closure), with Blizzard's function
+--                          itself (direct), or not at all; then the player
+--                          types /console test_cameraOverShoulder 0.1
+--   (always on)            every StaticPopup_Show logs, a frame later, whether
+--                          each shown dialog's `which` was written securely
+--                          (issecurevariable) or TAINTED, and by which addon
+--   /lsprobe dialogs       that read, now
+--   /lsprobe focus         3 s later: the frame under the mouse and its
+--                          parents, with every field written tainted (for a
+--                          dialog that does not come from StaticPopup_Show)
+--   /lsprobe next          prints the /console line to type (a changing value)
 --   /lsprobe restore       puts every CVar this probe touched back
 --   /lsprobe log | clear
 ----------------------------------------------------------------------------
@@ -61,6 +75,16 @@ local function RestoreAll()
     saved = {}
     ConsoleExec("pitchlimit 88")
     Log("restored every CVar the probe touched")
+end
+
+-- The /console line for the player to type: a value that CHANGES the CVar
+-- (a write that changes nothing may raise no popup, which would read as
+-- "suppressed"). Typed by the player, the write is a secure one.
+local function Next()
+    local v = tonumber(GetCVar("test_cameraOverShoulder")) or 0
+    v = v >= 0.85 and 0 or math.floor(v * 10 + 0.5) / 10 + 0.1
+    Log(("  type: /console test_cameraOverShoulder %.1f  (now %s). Popup or not? Click Disable if it shows")
+        :format(v, tostring(GetCVar("test_cameraOverShoulder"))))
 end
 
 local function ClearCentring()
@@ -153,16 +177,82 @@ function Show()
             local ok, why = SC:Enter(self)
             Log(("== show: Enter -> %s %s"):format(tostring(ok), tostring(why)))
         end)
-        window:SetScript("OnHide", function() SC:Exit("closed"); Log("  exit") end)
+        window:SetScript("OnHide", function()
+            SC:Exit("closed"); Log("  exit")
+            C_Timer.After(1.5, Next)   -- after the restore and the re-register
+        end)
         window:Hide()
     end
     window:Show()
 end
 
 local function TestCVar()
-    Log("== testcvar: writing test_cameraOverShoulder 0 with nothing suppressed")
+    Log("== testcvar: writing test_cameraOverShoulder 0 with nothing suppressed (from ADDON code:")
+    Log("  compare with a /reload control; the player's own /console write is the clean trigger)")
     SetCVar("test_cameraOverShoulder", GetCVar("test_cameraOverShoulder") or "0")
     Log("  Did the experimental-feature popup appear? (yes = the library gave it back)")
+end
+
+-- 6. Does the dialog a re-registered experimental-CVar handler shows run
+-- tainted? Every StaticPopup_Show is watched (a post-hook, which leaves
+-- Blizzard's call secure): one frame later, each shown dialog's `which` is
+-- read with issecurevariable. StaticPopup_Show writes dialog.which, so a
+-- tainted write means the show ran tainted, and names the addon.
+local function DialogTaint(tag)
+    local function report(i, d)
+        local sec, by = issecurevariable(d, "which")
+        Log(("  [%s] dialog %s which=%s: %s"):format(tag, tostring(i), tostring(d.which),
+            sec and "written SECURELY" or ("TAINTED by " .. tostring(by))))
+    end
+    local n = 0
+    for i = 1, (STATICPOPUP_NUMDIALOGS or 4) do
+        local d = _G["StaticPopup" .. i]
+        if type(d) == "table" and d.IsShown and d:IsShown() then n = n + 1; report(i, d) end
+    end
+    if n == 0 and type(StaticPopup_ForEachShownDialog) == "function" then
+        StaticPopup_ForEachShownDialog(function(d) n = n + 1; report("pool", d) end)
+    end
+    if n == 0 then Log(("  [%s] no shown dialog found"):format(tag)) end
+end
+
+-- Any dialog, whatever shows it: 3 s after the command, the frame under the
+-- mouse and its parents are named, and every field written tainted is listed.
+local function Focus()
+    Log("== focus: put the mouse on the dialog (its Accept button); reading in 3 s")
+    C_Timer.After(3, function()
+        local foci = GetMouseFoci and GetMouseFoci() or {}
+        local f = foci[1]
+        if not f then Log("  nothing under the mouse"); return end
+        while f and f ~= UIParent do
+            local name = f.GetDebugName and f:GetDebugName() or (f.GetName and f:GetName()) or tostring(f)
+            local secure, tainted = 0, {}
+            for k in pairs(f) do
+                local ok, sec, by = pcall(issecurevariable, f, k)
+                if ok and sec then secure = secure + 1
+                elseif ok then tainted[#tainted + 1] = tostring(k) .. " (" .. tostring(by) .. ")" end
+            end
+            Log(("  %s shown=%s: %d fields secure, tainted: %s"):format(name, tostring(f:IsShown()),
+                secure, #tainted > 0 and table.concat(tainted, ", ") or "none"))
+            f = f.GetParent and f:GetParent()
+        end
+    end)
+end
+
+local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
+local function Rereg(how)
+    Log("== rereg " .. tostring(how) .. ": unregister, then register the handler this way")
+    Log("  " .. tostring(pcall(GameEvent.UnregisterInternalEvent, POPUP_EVENT)) .. " unregister")
+    if how == "closure" then          -- what the library does (r2)
+        Log("  " .. tostring(pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...)
+            return GameEvent.HandleExperimentalCVarConfirmationNeeded(...)
+        end)) .. " register a closure")
+    elseif how == "direct" then       -- Blizzard's own function, no addon closure
+        Log("  " .. tostring(pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT,
+            GameEvent.HandleExperimentalCVarConfirmationNeeded)) .. " register Blizzard's function")
+    else
+        Log("  left unregistered")
+    end
+    Next()
 end
 
 local ev = CreateFrame("Frame")
@@ -187,6 +277,10 @@ ev:SetScript("OnEvent", function(_, event, a1, a2)
                 if reason == "ui-shown" and window then window:Hide() end
             end,
         })
+        hooksecurefunc("StaticPopup_Show", function(which)
+            Log("StaticPopup_Show " .. tostring(which))
+            C_Timer.After(0, function() DialogTaint(tostring(which)) end)
+        end)
     elseif event == "PLAYER_REGEN_DISABLED" and armed then
         armed = false
         Log(("== combat started; InCombatLockdown() in the handler = %s"):format(tostring(InCombatLockdown())))
@@ -205,10 +299,14 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "invite" then Invite()
     elseif cmd == "show" then Show()
     elseif cmd == "testcvar" then TestCVar()
+    elseif cmd == "rereg" then Rereg(arg)
+    elseif cmd == "dialogs" then DialogTaint("now")
+    elseif cmd == "focus" then Focus()
+    elseif cmd == "next" then Next()
     elseif cmd == "restore" then RestoreAll()
     elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show | testcvar | restore | log | clear")
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end

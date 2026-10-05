@@ -12,8 +12,9 @@ takes PortalRoulette's `Camera/CameraMode.lua` extras as opt-in options.
 Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\` through
 `.pkgmeta` externals, and LibStub runs the newest copy loaded.
 
-**Status (2026-10-04): r1 implemented, local only.** No GitHub repo, no tag yet. AltStable is
-the pilot consumer (branch `feature/libshowcase` there). `docs/DESIGN.md` is the design.
+**Status (2026-10-05): MINOR 3 on `feature/r1`, local only.** No GitHub repo, no tag yet; the
+first tag will be `r3` (r1 and r2 were never tagged). PortalRoulette is the consumer; AltStable's
+`feature/libshowcase` branch is not in use. `docs/DESIGN.md` is the design.
 
 When it is published it must be **public** (the packager clones externals anonymously). MIT.
 
@@ -59,6 +60,10 @@ on `StaticPopup_Show` / `StaticPopupSpecial_Show`; the library brings the UI bac
 restore (`ShowUI`, not read as Escape), keeps the presentation and the lease, and calls
 `onGameUIShown("dialog")`. **Consumers must never call `StaticPopup_Show` for their own prompts:
 use their own frames.** `SC:Lift` is for the consumer's own frames, never a Blizzard one.
+Nor register a handler that shows one: the experimental-CVar popup is suppressed with
+`GameEvent.UnregisterInternalEvent` and **never re-registered**. MEASURED 70205: a
+`RegisterInternalEvent` from addon code (a closure, or Blizzard's own handler passed directly)
+showed the popup `TAINTED by` the addon (`issecurevariable(dialog, "which")`).
 
 ## Upgrade rules (several addons ship copies; the newest one wins, and it may not be yours)
 

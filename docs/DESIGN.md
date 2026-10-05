@@ -102,6 +102,10 @@ owner.
   `onGameUIShown("dialog")`. The dialog shows where Blizzard put it. A dialog with the UI up, under
   the player's own Alt+Z, or with no lease changes nothing. (A lease taken implicitly by
   `HideGameUI` alone is given back, as always once nothing is left to restore.)
+  MEASURED 70205 (`/lsprobe invite`): a real party invite while presenting brought the UI back
+  (`onGameUIShown("dialog")`, presentation active, lease held), the `PARTY_INVITE` dialog's
+  `which` read secure (`issecurevariable`), accepting it worked, and the later `QUIT` dialog was
+  secure and quit the game.
 - **Consumers must never call `StaticPopup_Show` for their own prompts: use their own frames.**
   `SC:Lift` is for the consumer's own frames, never a Blizzard one.
 - **Crash self-heal:** `Enter` writes the capture (view slot, zoom, every CVar it changes, the
@@ -111,10 +115,18 @@ owner.
 - **A CVar the client lacks is never created**, on the way in or out.
 - **The experimental-CVar popup** is suppressed before each `test_*` write with
   `GameEvent.UnregisterInternalEvent` (MEASURED 70205: callable, no ADDON_ACTION_BLOCKED, no popup)
-  and given back one frame after the restore with
-  `GameEvent.RegisterInternalEvent(event, function(...) GameEvent.HandleExperimentalCVarConfirmationNeeded(...) end)`.
+  and **never given back**: it stays off until the next `/reload`, so a later `test_*` write (the
+  player's, another addon's) applies without the "experimental camera features" confirmation.
+  That is the trade-off, and it is what AltStable's frame walk always did. The reason, MEASURED
+  70205 (`/lsprobe rereg`): Blizzard's own registration shows the popup (`StaticPopup_Show
+  "EXPERIMENTAL_CVAR_WARNING"`) with `issecurevariable(dialog, "which")` secure; after
+  `UnregisterInternalEvent` + `RegisterInternalEvent` from addon code, the player's own
+  `/console test_cameraOverShoulder` write brought it back **TAINTED by the registering addon**,
+  with an addon closure (r2's way) and with `GameEvent.HandleExperimentalCVarConfirmationNeeded`
+  passed itself alike. A tainted StaticPopup is what broke Quit (Blizzard dialogs, above).
+  `lib.impl.UnsuppressPopup` stays as a no-op: an r2 copy's pending `C_Timer` callback calls it.
   AltStable's frame walk (`GetFramesRegisteredForEvent`, varargs) is only the fallback when
-  `GameEvent` is absent; that path does not re-register (as in AltStable).
+  `GameEvent` is absent.
 - **The OnUpdate runner hangs from WorldFrame**: `SetUIVisibility(false)` hides UIParent's
   children, and a hidden frame's OnUpdate stops.
 
@@ -137,7 +149,8 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (65 muta
   `tests/test_parity.lua` shows no dialog.
 - A drop restores the frame level it recorded, and puts the frame back under its recorded parent
   (AltStable: always UIParent).
-- Popup suppression through `GameEvent`, re-registered afterwards.
+- Popup suppression through `GameEvent` (AltStable's frame walk did nothing on 70205); like
+  AltStable, never given back (Guarantees).
 - Events and the hook stay active whenever the lease is held, not only while the camera runs.
 - Combat, logout and zoning also call `onForcedExit`.
 - The `UnitBuff` mount-icon scan is gone: `UnitBuff` is absent from the 70205 API dump, so it
@@ -150,6 +163,7 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (65 muta
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
-| A real invite while presenting: does the UI come back with the camera running, and do accepting it and a later Quit work (no ADDON_ACTION_FORBIDDEN)? | `/lsprobe invite` |
-| The experimental-CVar handler is re-registered from addon code (a closure): does the popup it shows taint the pool? (Quit after it) | `/lsprobe show`, close, `/lsprobe testcvar`, then Quit |
-| The whole presentation; does the experimental popup come back after it? | `/lsprobe show`, then `/lsprobe testcvar` |
+
+Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
+securely (`issecurevariable`), and `/lsprobe focus` lists the tainted fields of the frame under the
+mouse: re-run `/lsprobe invite` and `/lsprobe rereg` when the build changes.

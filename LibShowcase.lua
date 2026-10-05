@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 2
+local MAJOR, MINOR = "LibShowcase-1.0", 3
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -556,9 +556,9 @@ end
 -- experimental feature?". On this Mainline-based client it is an INTERNAL
 -- event: GameEvent.UnregisterInternalEvent suppresses it (MEASURED 70205,
 -- PortalRoulette FOREVER-PROBE.md: callable, no ADDON_ACTION_BLOCKED, no
--- popup). Re-registered after the restore. Only where GameEvent is absent,
--- AltStable's fallback: unregister every frame registered for the event
--- (GetFramesRegisteredForEvent returns VARARGS, not a table).
+-- popup). NEVER re-registered (see UnsuppressPopup). Only where GameEvent is
+-- absent, AltStable's fallback: unregister every frame registered for the
+-- event (GetFramesRegisteredForEvent returns VARARGS, not a table).
 
 function I.SuppressExperimentalCVarPopup()
     local GE = rawget(_G, "GameEvent")
@@ -597,28 +597,18 @@ end
 lib.SuppressExperimentalCVarPopup = lib.SuppressExperimentalCVarPopup
     or function(...) return lib.impl.SuppressExperimentalCVarPopup(...) end
 
--- Give the popup back to Blizzard's handler, on the next frame: whether the
--- event for the restore write fires synchronously is not measured, and a
--- re-register before it would show the popup for our own restore.
-function I.UnsuppressPopupSoon()
-    if st.popupSuppressed ~= "gameevent" then return end
-    if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(0, function() return lib.impl.UnsuppressPopup() end)
-    else
-        I.UnsuppressPopup()
-    end
-end
-
+-- The popup is never given back: it stays off until the next /reload (as with
+-- AltStable's frame walk), so a later test_* write applies without asking.
+-- Re-registering taints the dialog pool. MEASURED 70205 (/lsprobe rereg):
+-- after UnregisterInternalEvent + RegisterInternalEvent from addon code, the
+-- player's own "/console test_cameraOverShoulder" brought the popup back, and
+-- issecurevariable(dialog, "which") read TAINTED by the registering addon,
+-- with an addon closure (r2's way) and with
+-- GameEvent.HandleExperimentalCVarConfirmationNeeded passed itself alike.
+-- Blizzard's own registration showed it securely. A tainted StaticPopup is
+-- what broke Quit (see "Blizzard dialogs").
+-- Kept as a no-op: an r2 copy's pending C_Timer callback calls it by name.
 function I.UnsuppressPopup()
-    if st.popupSuppressed ~= "gameevent" then return end
-    if st.cam.active then return end            -- a new presentation still wants it off
-    local GE = rawget(_G, "GameEvent")
-    if type(GE) == "table" and type(GE.RegisterInternalEvent) == "function" then
-        pcall(GE.RegisterInternalEvent, POPUP_EVENT, function(...)
-            return GameEvent.HandleExperimentalCVarConfirmationNeeded(...)
-        end)
-    end
-    st.popupSuppressed = nil
 end
 
 --------------------------------------------------------------------------------
@@ -883,7 +873,6 @@ function I.Restore(inst, reason)
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
     I.DropAll()
-    I.UnsuppressPopupSoon()
     I.MaybeRelease()
     if wasActive then I.Debug(inst, "restored: " .. tostring(reason or "force")) end
 end
@@ -1035,7 +1024,6 @@ function I.Heal(inst)
     if type(cap) ~= "table" then return false end
     I.RestoreCapture(cap)
     db[lib.DB_KEY] = nil
-    I.UnsuppressPopupSoon()
     I.Debug(inst, "restored the camera a previous session left changed")
     return true
 end

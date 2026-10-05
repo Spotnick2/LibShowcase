@@ -64,12 +64,13 @@ do
     check(same, "every CVar is exactly as found: " .. tostring(which))
     eq(WoW.camera.zoom, 12, "and the zoom")
     eq(WoW.popupShown, 0, "still no popup, the restore write included")
-    eq(WoW.internal.EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED, nil, "the popup stays off until the next frame")
+    eq(#WoW.timers, 0, "nothing is scheduled to give the popup back")
     WoW.flushTimers()
-    check(type(WoW.internal.EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED) == "function",
-          "then Blizzard's handler is registered again")
+    eq(WoW.internal.EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED, nil,
+       "the popup stays off (re-registering from addon code taints the dialog pool)")
+    check(not hasCall("RegisterInternalEvent"), "RegisterInternalEvent is never called")
     SetCVar("test_cameraOverShoulder", "0")
-    eq(WoW.popupShown, 1, "so a later test_* write asks again, as it would without us")
+    eq(WoW.popupShown, 0, "so a later test_* write applies without asking, until /reload")
 end
 
 ------------------------------------------------------------------------------

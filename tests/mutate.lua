@@ -36,9 +36,7 @@ local M = {
     { "a method captures an implementation", {
         { "        lib.methods[name] = function(self, ...)\n            lib.impl.Check(self, name)\n            return lib.impl[name](self, ...)",
           "        local captured = lib.impl[name]\n        lib.methods[name] = function(self, ...)\n            lib.impl.Check(self, name)\n            return captured(self, ...)" } } },
-    { "a timer captures an implementation", {
-        { "C_Timer.After(0, function() return lib.impl.UnsuppressPopup() end)",
-          "local captured = lib.impl.UnsuppressPopup\n        C_Timer.After(0, function() return captured() end)" } } },
+    { "an older copy's timer target removed", { { "function I.UnsuppressPopup()\nend\n", "" } } },
     { "methods replaced on upgrade", { { "    if lib.methods[name] == nil then\n", "    if true then\n" } } },
     -- Reuse tables in place (§5.1)
     { "a public table replaced", { { "lib.CENTRING_CVARS = fill(lib.CENTRING_CVARS or {}, {", "lib.CENTRING_CVARS = fill({}, {" } } },
@@ -98,8 +96,12 @@ local M = {
     -- The experimental popup
     { "no suppression before the offset write", { { "    I.SuppressExperimentalCVarPopup()\n    pcall(SetCVar, \"test_cameraOverShoulder\", desired)",
                                                     "    pcall(SetCVar, \"test_cameraOverShoulder\", desired)" } } },
-    { "re-registered before the restore write lands", { { '    if C_Timer and type(C_Timer.After) == "function" then\n        C_Timer.After', '    if false then\n        C_Timer.After' } } },
-    { "never re-registered", { { "    I.DropAll()\n    I.UnsuppressPopupSoon()\n", "    I.DropAll()\n" } } },
+    { "re-registered after a restore (taints the dialog pool)", {
+        { "    I.DropAll()\n    I.MaybeRelease()\n    if wasActive",
+          "    I.DropAll()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, GameEvent.HandleExperimentalCVarConfirmationNeeded)\n    I.MaybeRelease()\n    if wasActive" } } },
+    { "an older copy's timer re-registers", {
+        { "function I.UnsuppressPopup()\nend\n",
+          "function I.UnsuppressPopup()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...) return GameEvent.HandleExperimentalCVarConfirmationNeeded(...) end)\nend\n" } } },
     -- The camera
     { "the runner hangs from UIParent", { { 'CreateFrame("Frame", nil, WorldFrame)', 'CreateFrame("Frame", nil, UIParent)' } } },
     { "a missing CVar is created", { { "            if prev ~= nil then\n                capture[cvar] = prev", "            if true then\n                capture[cvar] = prev" } } },

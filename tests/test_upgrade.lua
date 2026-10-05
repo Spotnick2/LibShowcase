@@ -1,14 +1,15 @@
 -- What happens when several addons embed the library: the newest copy loaded
 -- wins, and it may not be yours.
 --
--- r1 has no released predecessor, so the newer copy here is SYNTHETIC: this
+-- The first release (r3) has no released predecessor (r1 and r2 were never
+-- tagged), so the newer copy here is SYNTHETIC: this
 -- checkout with MINOR + 1, a new option (and its type), a new method, a
 -- changed default, and every lib.impl function wrapped to count its calls.
 -- Instances, methods, the SetUIVisibility and StaticPopup hooks, the event and
--- OnUpdate scripts and pending C_Timer callbacks made by the current copy
+-- OnUpdate scripts and pending C_Timer callbacks (r2 queued one; r3 none)
 -- must run the newer copy's code afterwards, exactly once, and the upgrade
--- must touch no frame and make no camera call. From r2 on, the released r1 is
--- frozen as tests/fixtures/LibShowcase-r1.lua and loaded under the current
+-- must touch no frame and make no camera call. Once r3 is tagged it is
+-- frozen as tests/fixtures/LibShowcase-r3.lua and loaded under the current
 -- copy as well.
 dofile("tests/wow_stubs.lua")
 dofile("tests/harness.lua")
@@ -80,15 +81,11 @@ do
     local B = lib:New({ owner = "Other" })
     local win = newWindow()
     check(A:Enter(win), "A presents")
-    -- A pending timer from the current copy: a popup re-register queued by
-    -- an earlier restore (B's Acquire/Release would be refused; use a
-    -- suppression state the timer will act on).
-    lib.state.popupSuppressed = "gameevent"
-    local cam = lib.state.cam
-    cam.active = false
-    lib.impl.UnsuppressPopupSoon()
-    cam.active = true
-    eq(#WoW.timers, 1, "a C_Timer callback from the current copy is pending")
+    -- A pending timer from an older copy: r2's restore queued the popup
+    -- re-register as C_Timer.After(0, function() return lib.impl.UnsuppressPopup() end).
+    -- (r3 queues none.)
+    C_Timer.After(0, function() return lib.impl.UnsuppressPopup() end)
+    eq(#WoW.timers, 1, "a C_Timer callback from an older copy is pending")
 
     local held = {
         lib = lib, impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
@@ -150,9 +147,12 @@ do
     eq(A.Enter, held.enter, "a method keeps its identity")
     local n0 = mark("Exit")
     -- The pending timer.
-    local u0 = mark("UnsuppressPopup")
+    local u0, cam = mark("UnsuppressPopup"), lib.state.cam
+    cam.active = false               -- r2's UnsuppressPopup acted only when idle
     WoW.flushTimers()
+    cam.active = true
     eq(mark("UnsuppressPopup"), u0 + 1, "a C_Timer callback from the older copy runs the newer code, once")
+    check(not hasCall("RegisterInternalEvent"), "  which never re-registers the popup")
     -- The OnUpdate script.
     local o0 = mark("OnUpdate")
     WoW.tick(0.1, 1)
