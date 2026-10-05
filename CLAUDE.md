@@ -40,7 +40,8 @@ function, option, default, public table or table key. A breaking change is `LibS
 - Instance methods, **colon-called**: `Enter(anchor?)`, `Exit(reason?)`, `ForceRestore(reason?)`,
   `IsActive()`, `IsOwner()`, `Acquire()`, `Release()`, `HideGameUI(anchor?)`, `RestoreGameUI()`,
   `IsGameUIHidden()`, `Lift(frame, strata?)`, `Drop(frame)`, `IsLifted(frame)`,
-  `LiftPopup(dialog)`, `DropPopup(dialog)`.
+  `LiftPopup(dialog)` ("reveal for a dialog": brings the UI back, returns the dialog untouched),
+  `DropPopup(dialog)` (a no-op, kept for API stability).
 - Library functions, **dot-called**: `lib.SuppressExperimentalCVarPopup()`,
   `lib.ShoulderOffsetFor(race, zoom, mounted?)`.
 - Public tables, filled in place: `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`,
@@ -49,13 +50,23 @@ function, option, default, public table or table key. A breaking change is `LibS
 - **One owner.** The camera and the game UI are global, so `lib.state` holds one lease. Every
   mutation (UI hide, lift, camera, GameTooltip) needs it; another instance's calls are refused.
 
+## Blizzard dialogs: never touch them
+
+The library never calls `StaticPopup_Show` and never calls `SetParent`, `SetFrameStrata`,
+`HookScript` or anything else on a StaticPopup / StaticPopupSpecial frame. MEASURED 70205: the probe's old `/lsprobe popup` called `StaticPopup_Show("LSPROBE_TEST")` from addon code, then `SC:LiftPopup(dialog)` (`SetParent(nil)`, `SetFrameStrata`, `HookScript("OnHide")` on the dialog frame); the player's later Quit dialog failed with `[ADDON_ACTION_FORBIDDEN] AddOn 'LibShowcaseProbe' tried to call the protected function 'ForceQuit()'` (`StaticPopup_OnClick` -> `OnAccept`). StaticPopup frames are a pool shared with Blizzard's secure code: touching one taints it, and protected buttons (accept a guild invite, Quit, Logout) then fail.
+A dialog that appears while a lease holds the UI hidden is noticed by `hooksecurefunc` post-hooks
+on `StaticPopup_Show` / `StaticPopupSpecial_Show`; the library brings the UI back through its own
+restore (`ShowUI`, not read as Escape), keeps the presentation and the lease, and calls
+`onGameUIShown("dialog")`. **Consumers must never call `StaticPopup_Show` for their own prompts:
+use their own frames.** `SC:Lift` is for the consumer's own frames, never a Blizzard one.
+
 ## Upgrade rules (several addons ship copies; the newest one wins, and it may not be yours)
 
 These follow `C:\Projects\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
 
 - **Dispatch at call time.** Instance methods live in `lib.methods` (the instances' shared
   `__index`, a plain table) as `function(self, ...) return lib.impl[name](self, ...) end`. The
-  `SetUIVisibility` hook, the popup `OnHide` hooks, the event and `OnUpdate` scripts and every
+  `SetUIVisibility` and StaticPopup hooks, the event and `OnUpdate` scripts and every
   `C_Timer` callback call `lib.impl.<name>` when they run. Never capture an implementation
   function in anything that outlives the load.
 - **Reuse tables in place.** `lib.impl`, `lib.methods`, `lib.instances`, `lib.state`, the frames
@@ -87,7 +98,8 @@ every `tests\test_*.lua`), `tests\mutate.lua` (mutation run; not part of the sui
   library through the same scenarios and compares every camera, CVar and UI call in order.
 - Must cover: upgrade (r1: a synthetic newer copy), isolation (two instances), single owner,
   the camera-OFF lease, combat during cleanup, a protected frame's deferred drop, the crash
-  self-heal round trip, popup lift/drop, widget methods against the dump.
+  self-heal round trip, Blizzard dialogs (never touched; the UI brought back, the presentation
+  kept), widget methods against the dump.
 - **Mutation-test new tests** (`lua tests\mutate.lua`): every mutation must turn the suite red.
 
 ## Toolchain and commands

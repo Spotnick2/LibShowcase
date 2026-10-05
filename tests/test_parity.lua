@@ -13,7 +13,13 @@
 -- Not compared, on purpose (deliberate changes, tested elsewhere):
 -- - the experimental-popup suppression (the library uses
 --   GameEvent.UnregisterInternalEvent, which the block did not have);
--- - SetFrameLevel on a drop (the library restores the level it recorded).
+-- - SetFrameLevel on a drop (the library restores the level it recorded);
+-- - Blizzard dialogs: AltStable lifted and raised its StaticPopups over the
+--   hidden UI (LiftPopup: SetParent/SetFrameStrata/HookScript on the pooled
+--   frame). That taints the pool (MEASURED 70205: the player's Quit dialog
+--   then failed with ADDON_ACTION_FORBIDDEN), so the library never touches a
+--   dialog and brings the UI back instead. An intentional divergence: no
+--   scenario here shows a dialog; test_lease.lua covers the new behaviour.
 dofile("tests/wow_stubs.lua")
 dofile("tests/harness.lua")
 

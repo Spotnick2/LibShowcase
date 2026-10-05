@@ -317,6 +317,8 @@ do
     check(not pcall(lib.New, lib, { owner = "A", zoomm = 2 }), "an unknown option errors")
     check(not pcall(lib.New, lib, { owner = "A", zoom = "2" }), "a wrong type errors")
     check(not pcall(lib.New, lib, {}), "owner is required")
+    check(pcall(lib.New, lib, { owner = "A", onGameUIShown = function() end }), "onGameUIShown takes a function")
+    check(not pcall(lib.New, lib, { owner = "A", onGameUIShown = true }), "  and nothing else")
     check(not pcall(lib.New, { owner = "A" }), "a dot call errors")
     local SC = lib:New({ owner = "A", zoom = 99, savedViewSlot = 9, enterDuration = 0 })
     SC:Enter()

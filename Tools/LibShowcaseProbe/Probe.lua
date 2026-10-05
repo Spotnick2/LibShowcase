@@ -12,8 +12,11 @@
 --                          until InCombatLockdown() is TRUE, then calls
 --                          SetUIVisibility(false) and (true) and logs what
 --                          happened (and any ADDON_ACTION_BLOCKED)
---   /lsprobe popup         hides the UI, shows a StaticPopup lifted through
---                          the library: is it visible? Accept/cancel it.
+--   /lsprobe invite        opens the presentation (UI hidden); a friend sends
+--                          a party/guild invite: does the UI come back with
+--                          the camera still running, and does accepting work
+--                          (no ADDON_ACTION_FORBIDDEN)? The probe never shows
+--                          a Blizzard dialog itself.
 --   /lsprobe show          the full presentation on a small probe window
 --                          (Escape or /lsprobe show again to close); after it
 --                          closes, /lsprobe testcvar checks the popup is back
@@ -117,36 +120,24 @@ local function RunCombatChecks(tries)
     end)
 end
 
--- 4. A StaticPopup lifted out of a hidden UI through the library.
-StaticPopupDialogs = StaticPopupDialogs or {}
-StaticPopupDialogs.LSPROBE_TEST = {
-    text = "LibShowcase probe: can you see this popup with the interface hidden?",
-    button1 = "Yes", button2 = "No",
-    OnAccept = function() Log("  popup: YES, visible") end,
-    OnCancel = function() Log("  popup: NO (or cancelled)") end,
-    OnHide = function(self)
-        Log(("  popup hidden: parent %s, strata %s, still lifted %s")
-            :format(self:GetParent() == UIParent and "UIParent" or tostring(self:GetParent()),
-                    tostring(self:GetFrameStrata()), tostring(SC:IsLifted(self))))
-        C_Timer.After(0.2, function() SC:Release(); Log("  UI restored") end)
-    end,
-    timeout = 0, whileDead = true, hideOnEscape = true,
-}
-
-local function Popup()
-    Log("== popup")
-    SC:Acquire()
-    SC:HideGameUI()
-    local d = StaticPopup_Show("LSPROBE_TEST")
-    if not d then Log("  StaticPopup_Show returned nil"); SC:Release(); return end
-    SC:LiftPopup(d)
-    Log(("  shown: IsVisible %s, parent %s, strata %s"):format(tostring(d:IsVisible()),
-        tostring(d:GetParent()), tostring(d:GetFrameStrata())))
+-- 4. A Blizzard dialog while the library has the UI hidden. The probe never
+-- creates one itself (StaticPopup_Show from addon code taints the pool:
+-- MEASURED 70205, the Quit dialog then failed with ADDON_ACTION_FORBIDDEN);
+-- a friend sends a real invite. The library's hook should bring the UI back
+-- (onGameUIShown logs it) with the presentation still running; accepting
+-- must not log ADDON_ACTION_FORBIDDEN/BLOCKED.
+local window
+local Show
+local function Invite()
+    Log("== invite: the presentation opens with the UI hidden")
+    if not (window and window:IsShown()) then Show() end
+    Log("  ask a friend for a party or guild invite. Expect 'onGameUIShown dialog', the UI back,")
+    Log("  the camera still orbiting; accept it (no FORBIDDEN line), then /lsprobe show to close.")
+    Log("  Then open the game menu and Quit/Logout: it must work (cancel the countdown).")
 end
 
 -- 5. The whole presentation.
-local window
-local function Show()
+function Show()
     if window and window:IsShown() then window:Hide(); return end
     if not window then
         window = CreateFrame("Frame", "LibShowcaseProbeWindow", UIParent)
@@ -187,6 +178,10 @@ ev:SetScript("OnEvent", function(_, event, a1, a2)
             owner = "LibShowcaseProbe",
             db = function() return LibShowcaseProbeDB end,
             debug = function(msg) Log("  [lib] " .. msg) end,
+            onGameUIShown = function(reason)
+                Log(("  onGameUIShown %s (UI shown %s, presentation active %s, owner %s)"):format(tostring(reason),
+                    tostring(UIParent:IsShown()), tostring(SC:IsActive()), tostring(SC:IsOwner())))
+            end,
             onForcedExit = function(reason)
                 Log("  onForcedExit " .. tostring(reason))
                 if reason == "ui-shown" and window then window:Hide() end
@@ -207,13 +202,13 @@ SlashCmdList.LSPROBE = function(msg)
     if cmd == "pitch" then Pitch(arg)
     elseif cmd == "nudge" then Nudge(arg)
     elseif cmd == "combat" then Combat()
-    elseif cmd == "popup" then Popup()
+    elseif cmd == "invite" then Invite()
     elseif cmd == "show" then Show()
     elseif cmd == "testcvar" then TestCVar()
     elseif cmd == "restore" then RestoreAll()
     elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | popup | show | testcvar | restore | log | clear")
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show | testcvar | restore | log | clear")
     end
 end

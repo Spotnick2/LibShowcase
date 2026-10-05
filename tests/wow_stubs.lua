@@ -18,6 +18,9 @@
 --   ADDON_ACTION_BLOCKED would).
 -- - The experimental-CVar popup: a test_* write while the internal event is
 --   registered "shows" it (WoW.popupShown).
+-- - Blizzard_StaticPopup: StaticPopup_Show, StaticPopupSpecial_Show and
+--   StaticPopup_ForEachShownDialog over a pool of dialog frames, fresh each
+--   reset (as SetUIVisibility is), so a hook from an earlier load is gone.
 -- - Every widget method called is recorded (WoW.methodsCalled) for
 --   test_methods.lua, and logged per widget with its arguments (w._log).
 
@@ -181,6 +184,47 @@ function WoW.reset()
     SetUIVisibility = function(v)
         log("SetUIVisibility", v)
         UIParent._shown = v and true or false
+    end
+
+    -- Blizzard_StaticPopup (FrameXML, not the engine): a pool of dialogs under
+    -- UIParent and the list of shown ones. StaticPopup_SetUpPosition inserts
+    -- the dialog into that list BEFORE Show. The stub moves its dialogs by
+    -- field, never through a method, so a dialog's _log holds only what an
+    -- addon did to it. WoW.refuseDialogs: a show condition says no (nil).
+    WoW.dialogs = {}          -- the pool
+    WoW.shownDialogs = {}
+    WoW.refuseDialogs = false
+    StaticPopup_Show = function(which)
+        if WoW.refuseDialogs then return nil end
+        local d
+        for _, x in ipairs(WoW.dialogs) do if not x._shown then d = x; break end end
+        if not d then
+            d = newWidget("Frame", UIParent, "StaticPopup" .. (#WoW.dialogs + 1))
+            d._shown = false
+            d._strata = "DIALOG"
+            WoW.dialogs[#WoW.dialogs + 1] = d
+        end
+        d.which = which
+        table.insert(WoW.shownDialogs, d)
+        d._parent, d._shown = UIParent, true
+        return d
+    end
+    StaticPopupSpecial_Show = function(d)
+        d.special = true
+        table.insert(WoW.shownDialogs, d)
+        d._parent, d._shown = UIParent, true
+    end
+    StaticPopup_ForEachShownDialog = function(fn)
+        for _, d in ipairs(WoW.shownDialogs) do fn(d) end
+        return nil
+    end
+end
+
+-- Close a dialog as Blizzard does (accept, cancel, Escape).
+function WoW.closeDialog(d)
+    d._shown = false
+    for i, x in ipairs(WoW.shownDialogs) do
+        if x == d then table.remove(WoW.shownDialogs, i); break end
     end
 end
 

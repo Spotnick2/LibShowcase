@@ -13,16 +13,23 @@
 -- ONE OWNER. The camera, the CVars and the game UI's visibility are global,
 -- so lib.state holds a single lease. Every mutation (hiding the UI, lifting a
 -- frame, the camera, GameTooltip) needs it, and another instance's calls are
--- refused. Enter, HideGameUI, Lift and LiftPopup take the lease when it is
--- free and give it back when everything they changed is restored; Acquire
--- holds it until Release. Ownership lasts until deferred cleanup is done (an
--- exit animation, a protected frame waiting for combat to end).
+-- refused. Enter, HideGameUI and Lift take the lease when it is free and
+-- give it back when everything they changed is restored; Acquire holds it
+-- until Release. Ownership lasts until deferred cleanup is done (an exit
+-- animation, a protected frame waiting for combat to end).
+--
+-- BLIZZARD DIALOGS ARE NEVER TOUCHED. No StaticPopup_Show, and no SetParent,
+-- SetFrameStrata or HookScript on a StaticPopup frame: they are a pool shared
+-- with Blizzard's secure code, and an addon that touches one taints it
+-- (MEASURED 70205: the player's Quit dialog then failed with
+-- ADDON_ACTION_FORBIDDEN ForceQuit()). A dialog shown while the library has
+-- the UI hidden brings the UI back instead; the presentation goes on.
 --
 -- Several addons embed copies and the newest one loaded wins (LibStub), so an
 -- instance made by an older copy must run this copy's code. Hence the rules:
 -- - Instance methods live in lib.methods, the instances' shared __index (a
 --   plain table), as thin closures that look up lib.impl.<name> WHEN THEY RUN.
---   The SetUIVisibility hook, popup OnHide hooks, event/OnUpdate scripts and
+--   The SetUIVisibility and StaticPopup hooks, event/OnUpdate scripts and
 --   C_Timer callbacks do the same. Never capture an implementation function.
 -- - lib.impl, lib.methods, lib.instances, lib.state, the frames and every
 --   public table keep their identity across upgrades (X = X or {}).
@@ -47,8 +54,6 @@ lib.defaults = lib.defaults or {}
 lib.state = lib.state or {}
 local st = lib.state
 st.lifts = st.lifts or {}          -- ordered: { frame, parent, strata, scale, level, points, inst }
-st.popups = st.popups or {}        -- [dialog] = { inst, strata, lifted }
-st.popupHooked = st.popupHooked or {}
 st.cam = st.cam or {}              -- the camera presentation (active, mode, inst, cfg, capture, ...)
 
 local I = lib.impl   -- the same table across upgrades; looked up at call time
@@ -131,7 +136,7 @@ local CAST_EVENTS = {
 
 -- Defaults are AltStable's (Config.lua's camera defaults). nil-default options
 -- (shoulderRef, mountedShoulder, pitchLimit, viewBlendStyle, db, onForcedExit,
--- debug) are off until a consumer sets them.
+-- onGameUIShown, debug) are off until a consumer sets them.
 lib.defaults.opts = fill(lib.defaults.opts or {}, {
     zoom = 2.2,
     mountedZoom = 8.0,
@@ -161,7 +166,7 @@ lib.defaults.types = fill(lib.defaults.types or {}, {
     savedViewSlot = "number", presentationViewSlot = "number", hideUI = "boolean",
     anchorStrata = "string", castAware = "boolean", dynamicPitch = "boolean",
     pitchLimit = "number", viewBlendStyle = "number", salute = "boolean",
-    onForcedExit = "function", debug = "boolean|function",
+    onForcedExit = "function", onGameUIShown = "function", debug = "boolean|function",
 })
 
 local function Clamp(v, minV, maxV, fallback)
@@ -239,14 +244,22 @@ function I.DB(inst)
     return type(db) == "table" and db or nil
 end
 
-function I.Notify(inst, reason)
-    local f = inst and inst.opts and inst.opts.onForcedExit
+local function Call(f, reason)
     if type(f) ~= "function" then return end
     local ok, err = pcall(f, reason)
     if not ok then
         local handler = rawget(_G, "geterrorhandler")
         if type(handler) == "function" then pcall(handler(), err) end
     end
+end
+
+function I.Notify(inst, reason)
+    Call(inst and inst.opts and inst.opts.onForcedExit, reason)
+end
+
+-- The game UI came back while the presentation goes on (a dialog appeared).
+function I.NotifyShown(inst, reason)
+    Call(inst and inst.opts and inst.opts.onGameUIShown, reason)
 end
 
 -- Dot-calling an instance method lands the first argument in `inst`.
@@ -267,7 +280,7 @@ function I.Claim(inst)
 end
 
 function I.Idle()
-    return not st.cam.active and not st.uiHidden and #st.lifts == 0 and next(st.popups) == nil
+    return not st.cam.active and not st.uiHidden and #st.lifts == 0
 end
 
 -- Give the lease back once nothing is left to restore and nobody Acquired it.
@@ -397,69 +410,6 @@ function I.DropDeferred()
 end
 
 --------------------------------------------------------------------------------
--- Popups
---------------------------------------------------------------------------------
--- A StaticPopup is a pooled child of UIParent, shared with every addon. Raised
--- to FULLSCREEN_DIALOG (a DIALOG-strata window would cover it) and, while the
--- interface is hidden (by the showcase or by the player's Alt+Z), lifted out
--- of it. Put back by whichever route it closes: an OnHide hook (accept,
--- cancel and Escape all hide it), DropPopup, or any restore.
-
-function I.LiftPopup(inst, dialog)
-    if type(dialog) ~= "table" then return dialog end
-    if not I.Claim(inst) then return dialog end
-    local entry = st.popups[dialog]
-    if not entry then
-        entry = { inst = inst }
-        st.popups[dialog] = entry
-        if dialog.GetFrameStrata then
-            entry.strata = dialog:GetFrameStrata()
-            pcall(dialog.SetFrameStrata, dialog, "FULLSCREEN_DIALOG")
-        end
-        if not st.popupHooked[dialog] and type(dialog.HookScript) == "function" then
-            st.popupHooked[dialog] = true
-            pcall(dialog.HookScript, dialog, "OnHide", function(self) return lib.impl.OnPopupHide(self) end)
-        end
-    end
-    local hidden = st.uiHidden or (UIParent and UIParent.IsShown and not UIParent:IsShown())
-    if hidden and not entry.lifted then
-        entry.lifted = I.Lift(inst, dialog, "FULLSCREEN_DIALOG") and true or nil
-    end
-    return dialog
-end
-
--- Idempotent and re-entrant: the entry is taken before anything moves.
-function I.DropPopupEntry(dialog)
-    local entry = st.popups[dialog]
-    if not entry then return end
-    st.popups[dialog] = nil
-    if entry.lifted then
-        local rec = I.FindLift(dialog)
-        if rec then I.DropRecord(rec) end
-    end
-    if entry.strata then pcall(dialog.SetFrameStrata, dialog, entry.strata) end
-end
-
-function I.DropPopup(inst, dialog)
-    if type(dialog) ~= "table" or not st.popups[dialog] then return end
-    I.DropPopupEntry(dialog)
-    I.MaybeRelease()
-end
-
-function I.OnPopupHide(dialog)
-    if st.popups[dialog] then
-        I.DropPopupEntry(dialog)
-        I.MaybeRelease()
-    end
-end
-
-function I.DropAllPopups()
-    local all = {}
-    for dialog in pairs(st.popups) do all[#all + 1] = dialog end
-    for _, dialog in ipairs(all) do I.DropPopupEntry(dialog) end
-end
-
---------------------------------------------------------------------------------
 -- The game UI (Alt+Z style)
 --------------------------------------------------------------------------------
 -- SetUIVisibility(false) is the engine's own call (the one Alt+Z makes): it
@@ -520,6 +470,83 @@ end
 
 function I.IsGameUIHidden(inst)
     return st.uiHidden == true
+end
+
+--------------------------------------------------------------------------------
+-- Blizzard dialogs: never touched
+--------------------------------------------------------------------------------
+-- StaticPopup frames are a pool Blizzard's secure code shares with every
+-- addon. Showing one from addon code (StaticPopup_Show), or modifying or
+-- hooking one of the frames (SetParent, SetFrameStrata, HookScript), taints
+-- it, and a protected action a later dialog runs from it is forbidden.
+-- MEASURED 70205: after the probe's StaticPopup_Show + LiftPopup (SetParent,
+-- SetFrameStrata, HookScript("OnHide") on the dialog), the player's Quit
+-- dialog failed: ADDON_ACTION_FORBIDDEN, ForceQuit() from StaticPopup_OnClick.
+--
+-- So a dialog that appears while the library has the game UI hidden (a guild
+-- or party invite, a summon, a ready check) brings the UI back, and the dialog
+-- shows where Blizzard put it, untouched. The presentation goes on: camera,
+-- lease, the consumer's window (back under the shown UIParent). Post-hooks
+-- (hooksecurefunc) on StaticPopup_Show and StaticPopupSpecial_Show notice it;
+-- a post-hook leaves Blizzard's own call secure.
+
+-- StaticPopup_Show returns nil when it refuses (a show condition), and a hook
+-- does not see the return: ask the shown list instead (Blizzard_StaticPopup's
+-- StaticPopup_SetUpPosition inserts the dialog there before it calls Show).
+function I.AnyDialogShown()
+    local each = rawget(_G, "StaticPopup_ForEachShownDialog")
+    if type(each) ~= "function" then return true end
+    local any = false
+    pcall(each, function() any = true end)
+    return any
+end
+
+-- Bring the game UI back and keep the presentation. Through ShowUI, which
+-- clears uiHidden before SetUIVisibility(true), so the SetUIVisibility hook
+-- does not read it as Escape/Alt+Z. Acts only while a lease holds the UI
+-- hidden (the player's own Alt+Z is the player's business).
+function I.RevealForDialog(reason)
+    local inst = st.owner
+    if not inst or not st.uiHidden then return false end
+    I.ShowUI()
+    I.Debug(inst, "game UI shown: " .. tostring(reason))
+    I.NotifyShown(inst, reason)
+    I.MaybeRelease()
+    return true
+end
+
+function I.OnStaticPopupShow()
+    if st.uiHidden and I.AnyDialogShown() then I.RevealForDialog("dialog") end
+end
+
+function I.OnStaticPopupSpecialShow()
+    I.RevealForDialog("dialog")
+end
+
+-- "Reveal for a dialog": brings the game UI back (as above) and hands the
+-- dialog back UNTOUCHED. Does nothing when the UI is up or the caller does
+-- not hold the lease. (Consumers must not show StaticPopups of their own.)
+function I.LiftPopup(inst, dialog)
+    if I.IsOwner(inst) then I.RevealForDialog("dialog") end
+    return dialog
+end
+
+-- Kept for API stability: LiftPopup changes nothing on the dialog to put back.
+function I.DropPopup(inst, dialog)
+end
+
+-- Installed once each, when Blizzard_StaticPopup is loaded: at load, or at
+-- PLAYER_LOGIN if it came later.
+function I.InstallDialogHooks()
+    if type(hooksecurefunc) ~= "function" then return end
+    if not lib.hooked.StaticPopup_Show and type(rawget(_G, "StaticPopup_Show")) == "function" then
+        lib.hooked.StaticPopup_Show = true
+        hooksecurefunc("StaticPopup_Show", function() lib.impl.OnStaticPopupShow() end)
+    end
+    if not lib.hooked.StaticPopupSpecial_Show and type(rawget(_G, "StaticPopupSpecial_Show")) == "function" then
+        lib.hooked.StaticPopupSpecial_Show = true
+        hooksecurefunc("StaticPopupSpecial_Show", function() lib.impl.OnStaticPopupSpecialShow() end)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -838,7 +865,7 @@ function I.RestoreCapture(cap)
     if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end
 end
 
--- Everything back, at once: UI, camera, CVars, popups, lifts. Protected
+-- Everything back, at once: UI, camera, CVars, lifts. Protected
 -- frames in combat wait for PLAYER_REGEN_ENABLED (and hold the lease).
 function I.Restore(inst, reason)
     local cam = st.cam
@@ -855,7 +882,6 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
-    I.DropAllPopups()
     I.DropAll()
     I.UnsuppressPopupSoon()
     I.MaybeRelease()
@@ -1016,6 +1042,7 @@ end
 
 function I.OnEvent(event, ...)
     if event == "PLAYER_LOGIN" then
+        I.InstallDialogHooks()
         for _, inst in ipairs(lib.instances) do I.Heal(inst) end
         return
     end
@@ -1086,6 +1113,7 @@ if not lib.hooked.SetUIVisibility and type(hooksecurefunc) == "function" and typ
     lib.hooked.SetUIVisibility = true
     hooksecurefunc("SetUIVisibility", function(visible) return lib.impl.OnSetUIVisibility(visible) end)
 end
+I.InstallDialogHooks()
 
 --------------------------------------------------------------------------------
 -- Instances

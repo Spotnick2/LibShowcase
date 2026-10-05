@@ -29,6 +29,8 @@ local eb = CreateFrame("EditBox", "ChatFrame1EditBox", UIParent)
 rawset(_G, "ChatEdit_DeactivateChat", false)    -- the fallback path: ClearFocus/Hide
 WoW.methodsCalled = {}
 SC:Enter(win)
+StaticPopup_Show("PARTY_INVITE")              -- the reveal path
+SC:HideGameUI(win)
 SC:LiftPopup(popup)
 WoW.tick(0.1, 16)
 WoW.fire("UNIT_SPELLCAST_START", "player")

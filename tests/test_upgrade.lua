@@ -4,7 +4,7 @@
 -- r1 has no released predecessor, so the newer copy here is SYNTHETIC: this
 -- checkout with MINOR + 1, a new option (and its type), a new method, a
 -- changed default, and every lib.impl function wrapped to count its calls.
--- Instances, methods, the SetUIVisibility hook, popup hooks, the event and
+-- Instances, methods, the SetUIVisibility and StaticPopup hooks, the event and
 -- OnUpdate scripts and pending C_Timer callbacks made by the current copy
 -- must run the newer copy's code afterwards, exactly once, and the upgrade
 -- must touch no frame and make no camera call. From r2 on, the released r1 is
@@ -54,6 +54,7 @@ do
     local lib = freshLibrary("AltStable")
     local A = lib:New({ owner = "AltStable" })
     local impl, enter, method, hook = lib.impl, lib.impl.Enter, lib.methods.Enter, SetUIVisibility
+    local dialogHook, specialHook = StaticPopup_Show, StaticPopupSpecial_Show
     local frames = #WoW.frames
     loadCopy(copyOf(), "PortalRoulette")
     eq(LibStub(MAJOR), lib, "equal-after-equal keeps the library table")
@@ -61,6 +62,8 @@ do
     eq(lib.impl.Enter, enter, "and its functions")
     eq(lib.methods.Enter, method, "and the methods")
     eq(SetUIVisibility, hook, "the hook is not installed twice")
+    eq(StaticPopup_Show, dialogHook, "nor the StaticPopup_Show hook")
+    eq(StaticPopupSpecial_Show, specialHook, "nor the StaticPopupSpecial_Show hook")
     eq(#WoW.frames, frames, "no frame created")
     eq(#lib.instances, 1, "no instance added or lost")
     check(A:Enter(), "an instance still works")
@@ -76,9 +79,7 @@ do
     local A = lib:New({ owner = "AltStable", zoom = 5 })
     local B = lib:New({ owner = "Other" })
     local win = newWindow()
-    local popup = CreateFrame("Frame", nil, UIParent)
     check(A:Enter(win), "A presents")
-    A:LiftPopup(popup)
     -- A pending timer from the current copy: a popup re-register queued by
     -- an earlier restore (B's Acquire/Release would be refused; use a
     -- suppression state the timer will act on).
@@ -95,9 +96,9 @@ do
         FACTORS = lib.SHOULDER_FACTORS, human = lib.SHOULDER_FACTORS[1], RACE_IDS = lib.RACE_IDS,
         animFrame = lib.animFrame, eventFrame = lib.eventFrame, enter = A.Enter, opts = A.opts,
         hook = SetUIVisibility, suppress = lib.SuppressExperimentalCVarPopup, shoulder = lib.ShoulderOffsetFor,
-        mt = lib.instanceMT,
+        mt = lib.instanceMT, dialogHook = StaticPopup_Show, specialHook = StaticPopupSpecial_Show,
     }
-    local widgets = allWidgets({ win, popup })
+    local widgets = allWidgets({ win })
     local before, calls = logSizes(widgets), #WoW.calls
     local frames = #WoW.frames
 
@@ -121,6 +122,8 @@ do
     eq(lib.eventFrame, held.eventFrame, "and the event frame")
     eq(#WoW.frames, frames, "no frame created")
     eq(SetUIVisibility, held.hook, "the SetUIVisibility hook is not installed again")
+    check(StaticPopup_Show == held.dialogHook and StaticPopupSpecial_Show == held.specialHook,
+          "nor the StaticPopup hooks")
 
     -- Never touches anything.
     local after = logSizes(widgets)
@@ -159,11 +162,6 @@ do
     WoW.fire("PLAYER_LOGIN")                -- (heals nothing while presenting)
     eq(mark("OnEvent"), e0 + 1, "the event script runs the newer code, once")
     check(A:IsActive(), "  and leaves the presentation alone")
-    -- The popup's OnHide hook.
-    local p0 = mark("OnPopupHide")
-    popup:Hide()
-    eq(mark("OnPopupHide"), p0 + 1, "a popup hook installed by the older copy runs the newer code, once")
-    eq(popup:GetParent(), UIParent, "  and drops it")
     -- The SetUIVisibility hook: an unchanged-state call reaches it too.
     local h0 = mark("OnSetUIVisibility")
     SetUIVisibility(false)
@@ -176,6 +174,18 @@ do
     WoW.tick(0.1, 10)
     check(not A:IsOwner(), "the presentation finishes under the newer copy")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "and restores what the older copy changed")
+    -- The StaticPopup hooks the older copy installed.
+    A:Enter(win)
+    local s0, r0 = mark("OnStaticPopupShow"), mark("RevealForDialog")
+    local d = StaticPopup_Show("PARTY_INVITE")
+    eq(mark("OnStaticPopupShow"), s0 + 1, "the StaticPopup_Show hook runs the newer code, once")
+    eq(mark("RevealForDialog"), r0 + 1, "  and reveals the UI through it")
+    check(UIParent:IsShown() and A:IsActive(), "  the UI is back, the presentation goes on")
+    eq(#d._log, 0, "  the dialog untouched")
+    local sp0 = mark("OnStaticPopupSpecialShow")
+    StaticPopupSpecial_Show(CreateFrame("Frame", nil, UIParent))
+    eq(mark("OnStaticPopupSpecialShow"), sp0 + 1, "the StaticPopupSpecial_Show hook runs the newer code, once")
+    A:ForceRestore()
 end
 
 ------------------------------------------------------------------------------

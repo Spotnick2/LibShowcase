@@ -1,6 +1,6 @@
 -- The lease: one owner at a time, held until every deferred cleanup is done.
 -- Also the camera-OFF lease, combat during cleanup, a protected frame's
--- deferred drop, popups, and the crash self-heal.
+-- deferred drop, Blizzard dialogs, and the crash self-heal.
 dofile("tests/wow_stubs.lua")
 dofile("tests/harness.lua")
 
@@ -34,10 +34,7 @@ do
     check(A:IsActive() and not B:IsActive(), "IsActive is per owner")
     check(B:IsGameUIHidden(), "IsGameUIHidden reports the shared truth")
 
-    local d2 = CreateFrame("Frame", nil, UIParent)
-    A:LiftPopup(d2)
     A:Exit("closed")
-    d2:Hide()                                 -- a popup closing mid-exit checks the lease
     ok, why = B:Enter(wb)
     check(ok == false and why == "busy", "still busy during A's exit animation")
     WoW.tick(0.1, 10)
@@ -189,65 +186,141 @@ do
 end
 
 ------------------------------------------------------------------------------
--- Popups: raised above a DIALOG window, lifted out of a hidden UI, put back
--- however they close; never left detached.
+-- Blizzard dialogs are never touched. A dialog shown while the library has
+-- the UI hidden brings the UI back (through the library's own restore, not
+-- read as Escape); the camera, the lease and the window stay.
+-- MEASURED 70205: an addon that showed a StaticPopup and reparented, raised
+-- and hooked it tainted the pool: the player's Quit dialog then failed.
 ------------------------------------------------------------------------------
+-- Every call on the dialog other than a read (Get*/Is*, which the test makes).
+local function untouched(d, what)
+    local writes = {}
+    for _, c in ipairs(d._log) do
+        if not c[1]:match("^Get") and not c[1]:match("^Is") then writes[#writes + 1] = c[1] end
+    end
+    eq(table.concat(writes, ","), "", what .. ": the library made no call on the dialog (no SetParent/SetFrameStrata/HookScript)")
+end
+
+do
+    local lib = freshLibrary()
+    local shown, forced = {}, {}
+    local SC = lib:New({ owner = "A",
+        onGameUIShown = function(r) shown[#shown + 1] = r end,
+        onForcedExit = function(r) forced[#forced + 1] = r end })
+    local win = newWindow("MEDIUM")
+    SC:Enter(win)
+    WoW.tick(0.1, 16)
+    local yaw = WoW.camera.yaw
+    check(not UIParent:IsShown(), "presenting with the UI hidden")
+
+    local d = StaticPopup_Show("PARTY_INVITE", "Friend")
+    check(UIParent:IsShown(), "a StaticPopup_Show while hidden brings the UI back")
+    check(d:IsVisible(), "  so the dialog is visible where Blizzard put it")
+    eq(d:GetParent(), UIParent, "  still under UIParent")
+    eq(d:GetFrameStrata(), "DIALOG", "  at its own strata")
+    untouched(d, "StaticPopup_Show")
+    check(not SC:IsGameUIHidden(), "  the library knows the UI is up")
+    eq(shown[1], "dialog", "onGameUIShown(\"dialog\")")
+    eq(#shown, 1, "  once")
+    eq(#forced, 0, "not read as Escape/Alt+Z: no onForcedExit")
+    check(SC:IsActive() and lib.state.cam.mode ~= "exit", "the presentation goes on")
+    eq(WoW.camera.yaw, yaw, "  the orbit keeps turning")
+    eq(WoW.cvars.CameraKeepCharacterCentered, "0", "  the camera CVars stay")
+    check(SC:IsOwner(), "the lease is kept")
+    check(win:IsVisible() and win:GetParent() == UIParent, "the window stays open, back under the shown UI")
+
+    -- A second dialog with the UI already up: nothing more.
+    local mark = #WoW.calls
+    local d2 = StaticPopup_Show("GUILD_INVITE")
+    eq(#callsSince(mark), 0, "a dialog with the UI up makes no call")
+    eq(#shown, 1, "  and no callback")
+    untouched(d2, "with the UI up")
+    WoW.closeDialog(d); WoW.closeDialog(d2)
+
+    SC:Exit("closed")
+    WoW.tick(0.1, 10)
+    check(not SC:IsOwner(), "the exit still finishes and releases")
+    eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  restoring the camera")
+    untouched(d, "after the restore")
+end
+
+-- StaticPopupSpecial_Show, a refused StaticPopup_Show, LiftPopup/DropPopup.
+do
+    local lib = freshLibrary()
+    local shown = {}
+    local SC = lib:New({ owner = "A", onGameUIShown = function(r) shown[#shown + 1] = r end })
+    local other = lib:New({ owner = "B" })
+    local win = newWindow()
+    SC:Enter(win)
+
+    WoW.refuseDialogs = true
+    eq(StaticPopup_Show("X"), nil, "a refused StaticPopup_Show (nil)")
+    check(not UIParent:IsShown() and #shown == 0, "  leaves the UI hidden: no dialog is shown")
+    WoW.refuseDialogs = false
+
+    local special = CreateFrame("Frame", nil, UIParent)
+    special._log = {}
+    StaticPopupSpecial_Show(special)
+    check(UIParent:IsShown(), "StaticPopupSpecial_Show while hidden brings the UI back")
+    untouched(special, "StaticPopupSpecial_Show")
+    eq(shown[1], "dialog", "  onGameUIShown")
+    check(SC:IsActive() and SC:IsOwner(), "  presentation and lease kept")
+    WoW.closeDialog(special)
+    SC:ForceRestore()
+
+    -- LiftPopup: "reveal for a dialog", the dialog handed back untouched.
+    SC:Enter(win)
+    local d = CreateFrame("Frame", nil, UIParent)
+    d._log = {}
+    eq(other:LiftPopup(d), d, "another instance's LiftPopup hands the dialog back")
+    check(not UIParent:IsShown(), "  and does not touch A's hidden UI")
+    eq(SC:LiftPopup(d), d, "LiftPopup hands the dialog back")
+    check(UIParent:IsShown(), "  having brought the UI back")
+    check(SC:IsActive() and SC:IsOwner(), "  with the presentation and the lease kept")
+    eq(#shown, 2, "  and onGameUIShown called")
+    SC:LiftPopup(d)
+    eq(#shown, 2, "a LiftPopup with the UI already up does nothing")
+    StaticPopupSpecial_Show(CreateFrame("Frame", nil, UIParent))
+    eq(#shown, 2, "nor does a special dialog")
+    eq(SC:DropPopup(d), nil, "DropPopup is a no-op")
+    untouched(d, "LiftPopup/DropPopup")
+    eq(SC:LiftPopup(nil), nil, "LiftPopup(nil) is nil")
+    SC:ForceRestore()
+    eq(SC:LiftPopup(d), d, "LiftPopup with no lease")
+    check(not SC:IsOwner(), "  takes no lease")
+end
+
+-- No lease, or the player's own Alt+Z: nothing happens.
+do
+    local lib = freshLibrary()
+    local shown = 0
+    lib:New({ owner = "A", onGameUIShown = function() shown = shown + 1 end })
+    local mark = #WoW.calls
+    local d = StaticPopup_Show("PARTY_INVITE")
+    eq(#callsSince(mark), 0, "no lease: a dialog makes no call")
+    untouched(d, "no lease")
+    WoW.closeDialog(d)
+    SetUIVisibility(false)                    -- the player's Alt+Z, no lease
+    mark = #WoW.calls
+    d = StaticPopup_Show("PARTY_INVITE")
+    eq(#callsSince(mark), 0, "the player's own Alt+Z is left alone")
+    check(not UIParent:IsShown(), "  the UI stays hidden")
+    eq(shown, 0, "no callback")
+    untouched(d, "under the player's Alt+Z")
+    check(not lib.state.owner, "and no lease taken")
+end
+
+-- Camera OFF (Acquire + HideGameUI): the UI comes back, the lease stays.
 do
     local lib = freshLibrary()
     local SC = lib:New({ owner = "A" })
-    local function popup()
-        local d = CreateFrame("Frame", nil, UIParent)
-        d:SetFrameStrata("DIALOG")
-        return d
-    end
-
-    -- UI up: raised, not lifted.
-    local d = popup()
-    eq(SC:LiftPopup(d), d, "LiftPopup hands the dialog back")
-    eq(d:GetFrameStrata(), "FULLSCREEN_DIALOG", "  raised above a DIALOG window")
-    eq(d:GetParent(), UIParent, "  not lifted while the UI is up")
-    d:Hide()                                  -- accept, cancel and Escape all hide it
-    eq(d:GetFrameStrata(), "DIALOG", "hiding it puts the strata back (OnHide hook)")
-    check(not SC:IsOwner(), "  and the lease is free")
-
-    -- The player's own Alt+Z (no showcase): lifted.
-    SetUIVisibility(false)
-    d = popup()
-    SC:LiftPopup(d)
-    check(d:GetParent() == nil and d:IsVisible(), "with the UI hidden by Alt+Z it is lifted and visible")
-    SC:DropPopup(d)
-    eq(d:GetParent(), UIParent, "DropPopup puts it back")
-    eq(d:GetFrameStrata(), "DIALOG", "  at its strata")
-    check(not SC:IsLifted(d), "  nothing left marked")
-    SC:DropPopup(d)
-    eq(d:GetFrameStrata(), "DIALOG", "a second DropPopup is a no-op")
-
-    -- Re-entrant: the drop's own reparent under the hidden UIParent fires
-    -- OnHide (our hook) half way through.
-    d = popup()
-    SC:LiftPopup(d)
-    d:Show()
-    SC:DropPopup(d)
-    eq(d:GetFrameStrata(), "DIALOG", "a drop interrupted by its own OnHide ends at the right strata")
-    eq(d:GetParent(), UIParent, "  and under UIParent")
-    SetUIVisibility(true)
-
-    -- Presenting: a popup shown over the showcase, and the showcase ends
-    -- first. The pooled frame must not stay detached.
     local win = newWindow()
-    SC:Enter(win)
-    d = popup()
-    SC:LiftPopup(d)
-    check(d:GetParent() == nil and d:IsVisible(), "a popup over the showcase is lifted")
-    SC:ForceRestore("test")
-    eq(d:GetParent(), UIParent, "a restore drops it too")
-    eq(d:GetFrameStrata(), "DIALOG", "  with its strata")
-    check(not SC:IsOwner(), "  and nothing holds the lease")
-    -- The hook stays on the pooled frame, harmlessly.
-    d:Show(); d:Hide()
-    eq(d:GetFrameStrata(), "DIALOG", "a later, unrelated show/hide of the pooled frame is left alone")
-
-    eq(SC:LiftPopup(nil), nil, "LiftPopup(nil) is nil (a refused StaticPopup_Show)")
+    SC:Acquire()
+    SC:HideGameUI(win)
+    StaticPopup_Show("PARTY_INVITE")
+    check(UIParent:IsShown() and win:GetParent() == UIParent, "camera off: the UI and the window come back")
+    check(SC:IsOwner(), "  and the Acquired lease stays")
+    SC:Release()
 end
 
 ------------------------------------------------------------------------------
