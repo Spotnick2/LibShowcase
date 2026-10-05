@@ -1,0 +1,26 @@
+# LibShowcase-1.0 is never published on its own (it has no TOC, so the
+# packager would stop). Addons embed it through their .pkgmeta externals.
+#
+# CurseForge's packager does NOT apply this ignore list when it copies the
+# library into <addon>/Libs/LibShowcase-1.0 (measured in Priestly's published
+# zip, Priestly #53): every consumer repeats the non-dot entries below under
+# Libs/LibShowcase-1.0/ in its own .pkgmeta.
+#
+# LICENSE deliberately ships: MIT requires the notice to travel with the code.
+
+package-as: LibShowcase-1.0
+
+enable-nolib-creation: no
+
+ignore:
+  - tests
+  - docs
+  - Tools
+  - .github
+  - .claude
+  - .gitignore
+  - .gitattributes
+  - .pkgmeta
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
