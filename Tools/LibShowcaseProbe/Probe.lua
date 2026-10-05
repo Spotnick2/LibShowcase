@@ -1,0 +1,219 @@
+----------------------------------------------------------------------------
+-- LibShowcase Probe: the in-game measurements docs/DESIGN.md still lists as
+-- OPEN. Everything goes to a log in SavedVariables (written on /reload and on
+-- logout): WTF\Account\<ACCOUNT>\SavedVariables\LibShowcaseProbe.lua.
+--
+--   /lsprobe pitch [off]   test_cameraDynamicPitch with centring cleared:
+--                          walk forward/backward and watch for a pitch tilt
+--   /lsprobe nudge [0|1]   the shoulder offset written without (0) and with
+--                          (1) Narcissus's CameraZoomIn(0) nudge: does the
+--                          character move without the nudge?
+--   /lsprobe combat        arm: on the next combat, waits (C_Timer polling)
+--                          until InCombatLockdown() is TRUE, then calls
+--                          SetUIVisibility(false) and (true) and logs what
+--                          happened (and any ADDON_ACTION_BLOCKED)
+--   /lsprobe popup         hides the UI, shows a StaticPopup lifted through
+--                          the library: is it visible? Accept/cancel it.
+--   /lsprobe show          the full presentation on a small probe window
+--                          (Escape or /lsprobe show again to close); after it
+--                          closes, /lsprobe testcvar checks the popup is back
+--   /lsprobe testcvar      writes test_cameraOverShoulder = 0 with nothing
+--                          suppressed: does the experimental popup appear?
+--   /lsprobe restore       puts every CVar this probe touched back
+--   /lsprobe log | clear
+----------------------------------------------------------------------------
+
+local db
+local SC
+local saved = {}             -- CVar -> value before the probe touched it
+
+local function Log(text)
+    local line = ("%s %s"):format(date("%H:%M:%S"), text)
+    if db then
+        db.log = db.log or {}
+        table.insert(db.log, line)
+        while #db.log > 2000 do table.remove(db.log, 1) end
+    end
+    print("|cff88ccffLSProbe|r " .. text)
+end
+
+local function Save(cvar)
+    if saved[cvar] == nil then saved[cvar] = GetCVar(cvar) or false end
+end
+
+local function Set(cvar, value)
+    Save(cvar)
+    if cvar:find("^test_") then LibStub("LibShowcase-1.0").SuppressExperimentalCVarPopup() end
+    SetCVar(cvar, value)
+    Log(("  %s = %s (read back %s)"):format(cvar, tostring(value), tostring(GetCVar(cvar))))
+end
+
+local function RestoreAll()
+    for cvar, v in pairs(saved) do
+        if v ~= false then
+            if cvar:find("^test_") then LibStub("LibShowcase-1.0").SuppressExperimentalCVarPopup() end
+            SetCVar(cvar, v)
+        end
+    end
+    saved = {}
+    ConsoleExec("pitchlimit 88")
+    Log("restored every CVar the probe touched")
+end
+
+local function ClearCentring()
+    for _, cvar in ipairs(LibStub("LibShowcase-1.0").CENTRING_CVARS) do
+        if GetCVar(cvar) ~= nil then Set(cvar, "0") end
+    end
+end
+
+-- 1. Dynamic pitch, with the centring CVars that cancelled the shoulder offset cleared.
+local function Pitch(arg)
+    if arg == "off" then RestoreAll(); return end
+    Log("== pitch: build " .. select(2, GetBuildInfo()))
+    ClearCentring()
+    Set("test_cameraDynamicPitch", "1")
+    Log("  now walk forward and backward. Does the camera tilt (pitch) with movement? Note it, then /lsprobe pitch off")
+end
+
+-- 2. Is Narcissus's CameraZoomIn(0) nudge needed for the offset to apply?
+local function Nudge(arg)
+    Log("== nudge " .. tostring(arg))
+    ClearCentring()
+    Set("test_cameraOverShoulder", "0")
+    local want = arg == "1" and 1.5 or 1.4
+    Set("test_cameraOverShoulder", want)
+    if arg == "1" then
+        CameraZoomIn(0)
+        Log("  offset written, THEN CameraZoomIn(0)")
+    else
+        Log("  offset written, no nudge")
+    end
+    Log("  Did the character move sideways right away (without touching the mouse)? Then /lsprobe restore")
+end
+
+-- 3. SetUIVisibility under a real lockdown. REGEN_DISABLED itself is NOT
+-- locked (measured 70205), so wait until InCombatLockdown() turns true.
+local armed
+local function Combat()
+    armed = true
+    Log("== combat: armed. Pull something; results log when the lockdown is on")
+end
+
+local function RunCombatChecks(tries)
+    if not InCombatLockdown() then
+        if tries > 200 then Log("  lockdown never came on (10 s)"); return end
+        C_Timer.After(0.05, function() RunCombatChecks(tries + 1) end)
+        return
+    end
+    Log(("  InCombatLockdown() true after %d polls"):format(tries))
+    local ok1, err1 = pcall(SetUIVisibility, false)
+    Log(("  SetUIVisibility(false) in combat: pcall %s %s; UIParent:IsShown() = %s")
+        :format(tostring(ok1), tostring(err1), tostring(UIParent:IsShown())))
+    C_Timer.After(0.5, function()
+        local ok2, err2 = pcall(SetUIVisibility, true)
+        Log(("  SetUIVisibility(true) in combat: pcall %s %s; UIParent:IsShown() = %s")
+            :format(tostring(ok2), tostring(err2), tostring(UIParent:IsShown())))
+        Log("  (an ADDON_ACTION_BLOCKED line above or below would mean it is protected)")
+    end)
+end
+
+-- 4. A StaticPopup lifted out of a hidden UI through the library.
+StaticPopupDialogs = StaticPopupDialogs or {}
+StaticPopupDialogs.LSPROBE_TEST = {
+    text = "LibShowcase probe: can you see this popup with the interface hidden?",
+    button1 = "Yes", button2 = "No",
+    OnAccept = function() Log("  popup: YES, visible") end,
+    OnCancel = function() Log("  popup: NO (or cancelled)") end,
+    OnHide = function(self)
+        Log(("  popup hidden: parent %s, strata %s, still lifted %s")
+            :format(self:GetParent() == UIParent and "UIParent" or tostring(self:GetParent()),
+                    tostring(self:GetFrameStrata()), tostring(SC:IsLifted(self))))
+        C_Timer.After(0.2, function() SC:Release(); Log("  UI restored") end)
+    end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+
+local function Popup()
+    Log("== popup")
+    SC:Acquire()
+    SC:HideGameUI()
+    local d = StaticPopup_Show("LSPROBE_TEST")
+    if not d then Log("  StaticPopup_Show returned nil"); SC:Release(); return end
+    SC:LiftPopup(d)
+    Log(("  shown: IsVisible %s, parent %s, strata %s"):format(tostring(d:IsVisible()),
+        tostring(d:GetParent()), tostring(d:GetFrameStrata())))
+end
+
+-- 5. The whole presentation.
+local window
+local function Show()
+    if window and window:IsShown() then window:Hide(); return end
+    if not window then
+        window = CreateFrame("Frame", "LibShowcaseProbeWindow", UIParent)
+        window:SetSize(260, 120)
+        window:SetPoint("RIGHT", UIParent, "RIGHT", -120, 0)
+        local bg = window:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.6)
+        local fs = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("CENTER")
+        fs:SetText("LibShowcase probe\nEscape or /lsprobe show to close")
+        window:SetScript("OnShow", function(self)
+            local ok, why = SC:Enter(self)
+            Log(("== show: Enter -> %s %s"):format(tostring(ok), tostring(why)))
+        end)
+        window:SetScript("OnHide", function() SC:Exit("closed"); Log("  exit") end)
+        window:Hide()
+    end
+    window:Show()
+end
+
+local function TestCVar()
+    Log("== testcvar: writing test_cameraOverShoulder 0 with nothing suppressed")
+    SetCVar("test_cameraOverShoulder", GetCVar("test_cameraOverShoulder") or "0")
+    Log("  Did the experimental-feature popup appear? (yes = the library gave it back)")
+end
+
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("ADDON_LOADED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
+ev:RegisterEvent("ADDON_ACTION_BLOCKED")
+ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+ev:SetScript("OnEvent", function(_, event, a1, a2)
+    if event == "ADDON_LOADED" and a1 == "LibShowcaseProbe" then
+        LibShowcaseProbeDB = LibShowcaseProbeDB or {}
+        db = LibShowcaseProbeDB
+        SC = LibStub("LibShowcase-1.0"):New({
+            owner = "LibShowcaseProbe",
+            db = function() return LibShowcaseProbeDB end,
+            debug = function(msg) Log("  [lib] " .. msg) end,
+            onForcedExit = function(reason)
+                Log("  onForcedExit " .. tostring(reason))
+                if reason == "ui-shown" and window then window:Hide() end
+            end,
+        })
+    elseif event == "PLAYER_REGEN_DISABLED" and armed then
+        armed = false
+        Log(("== combat started; InCombatLockdown() in the handler = %s"):format(tostring(InCombatLockdown())))
+        RunCombatChecks(0)
+    elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+        Log(("  %s: %s %s"):format(event, tostring(a1), tostring(a2)))
+    end
+end)
+
+SLASH_LSPROBE1 = "/lsprobe"
+SlashCmdList.LSPROBE = function(msg)
+    local cmd, arg = (msg or ""):match("^(%S*)%s*(.-)$")
+    if cmd == "pitch" then Pitch(arg)
+    elseif cmd == "nudge" then Nudge(arg)
+    elseif cmd == "combat" then Combat()
+    elseif cmd == "popup" then Popup()
+    elseif cmd == "show" then Show()
+    elseif cmd == "testcvar" then TestCVar()
+    elseif cmd == "restore" then RestoreAll()
+    elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
+    elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
+    else
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | popup | show | testcvar | restore | log | clear")
+    end
+end
