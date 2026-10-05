@@ -8,9 +8,9 @@
 -- Instances, methods, the SetUIVisibility and StaticPopup hooks, the event and
 -- OnUpdate scripts and pending C_Timer callbacks (r2 queued one; r3 none)
 -- must run the newer copy's code afterwards, exactly once, and the upgrade
--- must touch no frame and make no camera call. The released r3 is frozen as
--- tests/fixtures/LibShowcase-r3.lua and loaded under the current copy too
--- (the last sections).
+-- must touch no frame and make no camera call. The released r3 is frozen,
+-- whole, as tests/fixtures/LibShowcase-r3/ and loaded with the current copy
+-- in both orders (the last sections).
 dofile("tests/wow_stubs.lua")
 dofile("tests/harness.lua")
 
@@ -46,6 +46,28 @@ local function allWidgets(extra)
     for _, w in ipairs(WoW.frames) do t[#t + 1] = w end
     for _, w in ipairs(extra or {}) do t[#t + 1] = w end
     return t
+end
+-- How many of `widgets` were called since `before` (from logSizes).
+local function touchedSince(before, widgets)
+    local after, n = logSizes(widgets), 0
+    for i, size in ipairs(before) do if after[i] ~= size then n = n + 1 end end
+    return n
+end
+
+-- Everything a load must leave with its identity, and the check that it did.
+local function shared(lib)
+    return {
+        lib = lib, impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
+        cam = lib.state.cam, lifts = lib.state.lifts, prompts = lib.state.prompts,
+        CENTRING = lib.CENTRING_CVARS, FACTORS = lib.SHOULDER_FACTORS, MOUNTED = lib.MOUNTED_SHOULDER_FACTORS,
+        RACE_IDS = lib.RACE_IDS, mt = lib.instanceMT, suppress = lib.SuppressExperimentalCVarPopup,
+        shoulder = lib.ShoulderOffsetFor, animFrame = lib.animFrame, eventFrame = lib.eventFrame,
+        hook = SetUIVisibility, dialogHook = StaticPopup_Show, specialHook = StaticPopupSpecial_Show,
+    }
+end
+local function checkKept(lib, held, what)
+    local now = shared(lib)
+    for k, v in pairs(held) do eq(now[k], v, what .. ": " .. k .. " keeps its identity") end
 end
 
 ------------------------------------------------------------------------------
@@ -123,10 +145,7 @@ do
           "nor the StaticPopup hooks")
 
     -- Never touches anything.
-    local after = logSizes(widgets)
-    local touched = 0
-    for i, n in ipairs(before) do if after[i] ~= n then touched = touched + 1 end end
-    eq(touched, 0, "the upgrade made no call on any widget")
+    eq(touchedSince(before, widgets), 0, "the upgrade made no call on any widget")
     eq(#WoW.calls, calls, "and no camera, CVar or UI call")
     check(A:IsActive() and not UIParent:IsShown() and win:GetParent() == nil,
           "the running presentation is untouched")
@@ -232,33 +251,51 @@ do
 end
 
 ------------------------------------------------------------------------------
--- The released r3 (frozen, byte for byte the tag's), then this checkout. The
--- checkout is the newer copy once a release raises MINOR; until then it is
--- the checkout with MINOR + 1.
+-- The released r3, whole (its XML, LibShowcase.lua and LibStub, byte for
+-- byte the tag's), with this checkout. The checkout is the newer copy once a
+-- release raises MINOR; until then it is the checkout with MINOR + 1. Either
+-- way every lib.impl function is wrapped to count its calls (mark), which is
+-- what tells the newer code from r3's.
 ------------------------------------------------------------------------------
-local R3 = "tests/fixtures/LibShowcase-r3.lua"
-local NEWER_THAN_R3 = (N > 3) and copyOf() or synthetic(N + 1)
+local R3 = "tests/fixtures/LibShowcase-r3"
 local NEWER_MINOR = (N > 3) and N or N + 1
+local NEWER_THAN_R3 = synthetic(NEWER_MINOR, [[
+LIBSHOWCASE_MARK = {}
+for name, f in pairs(lib.impl) do
+    lib.impl[name] = function(...)
+        LIBSHOWCASE_MARK[name] = (LIBSHOWCASE_MARK[name] or 0) + 1
+        return f(...)
+    end
+end]])
+local function sameCVars(a, b)
+    for k, v in pairs(a) do if b[k] ~= v then return false, k end end
+    for k, v in pairs(b) do if a[k] ~= v then return false, k end end
+    return true
+end
 
+-- r3 presenting, then the newer copy.
 do
     WoW.reset()
     WoW.resetLibStub()
+    rawset(_G, "LIBSHOWCASE_MARK", nil)
     local lib = loadCopy(releasedCopy(R3), "PortalRoulette")
     eq(activeMinor(), 3, "r3 is loaded (the fixture declares MINOR 3)")
     eq(lib.ready, 3, "  and finished loading")
-    local forced = {}
+    local forced, exited = {}, {}
     local DB = {}
-    local A = lib:New({ owner = "PortalRoulette", db = DB,
-        onForcedExit = function(r) forced[#forced + 1] = r; if r == "ui-shown" then A:Exit(r) end end })
+    local A   -- declared first: the callback below calls A:Exit
+    A = lib:New({ owner = "PortalRoulette", db = DB,
+        onForcedExit = function(r)
+            forced[#forced + 1] = r
+            if r == "ui-shown" then exited[#exited + 1] = A:Exit(r) end
+        end })
     local found = {}
     for k, v in pairs(WoW.cvars) do found[k] = v end
     local win = newWindow()
     check(A:Enter(win), "r3 presents")
     WoW.tick(0.1, 16)
-    local held = { impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
-                   cam = lib.state.cam, lifts = lib.state.lifts, prompts = lib.state.prompts,
-                   animFrame = lib.animFrame, eventFrame = lib.eventFrame, enter = lib.impl.Enter,
-                   hook = SetUIVisibility, dialogHook = StaticPopup_Show }
+    local held = shared(lib)
+    local opts, enter = A.opts, lib.impl.Enter
     local widgets = allWidgets({ win })
     local before, calls, frames = logSizes(widgets), #WoW.calls, #WoW.frames
 
@@ -266,37 +303,52 @@ do
 
     eq(activeMinor(), NEWER_MINOR, "the newer copy is active over r3")
     eq(lib.ready, NEWER_MINOR, "  and finished loading")
-    eq(LibStub(MAJOR), lib, "the same library table")
-    for _, k in ipairs({ "impl", "methods", "instances", "state" }) do
-        eq(lib[k], held[k], "lib." .. k .. " keeps its identity")
-    end
-    check(lib.state.cam == held.cam and lib.state.lifts == held.lifts and lib.state.prompts == held.prompts,
-          "the camera, lift and prompt state too")
-    check(lib.impl.Enter ~= held.enter, "lib.impl holds the newer code")
-    check(lib.animFrame == held.animFrame and lib.eventFrame == held.eventFrame, "r3's frames are reused")
+    checkKept(lib, held, "r3 then newer")
+    eq(A.opts, opts, "r3's instance keeps its opts table")
+    check(lib.impl.Enter ~= enter, "lib.impl holds the newer code")
     eq(#WoW.frames, frames, "no frame created")
-    check(SetUIVisibility == held.hook and StaticPopup_Show == held.dialogHook, "no hook installed again")
-    local after = logSizes(widgets)
-    local touched = 0
-    for i, n in ipairs(before) do if after[i] ~= n then touched = touched + 1 end end
-    eq(touched, 0, "the upgrade made no call on any widget")
+    eq(touchedSince(before, widgets), 0, "the upgrade made no call on any widget")
     eq(#WoW.calls, calls, "and no camera, CVar or UI call")
     check(A:IsActive() and not UIParent:IsShown() and win:GetParent() == nil, "r3's presentation runs on untouched")
 
-    -- r3's instance, hooks and event frame now run the newer code.
+    -- r3's instance, its event frame, hooks and OnUpdate script now run the
+    -- newer code: each reaches a counted lib.impl function.
     local B = lib:New({ owner = "AltStable" })
     eq(select(2, B:Enter()), "busy", "a newer-copy instance is refused while r3's presents")
+
+    local d0 = mark("OnStaticPopupShow")
+    local d = StaticPopup_Show("PARTY_INVITE")
+    eq(mark("OnStaticPopupShow"), d0 + 1, "r3's StaticPopup_Show hook runs the newer code")
+    check(UIParent:IsShown() and A:IsActive() and A:IsOwner(), "  which reveals the UI, presentation kept")
+    WoW.closeDialog(d)
+    check(A:HideGameUI(win), "r3's instance hides it again (method dispatch)")
+    local s0 = mark("OnStaticPopupSpecialShow")
+    local special = CreateFrame("Frame", nil, UIParent)
+    StaticPopupSpecial_Show(special)
+    eq(mark("OnStaticPopupSpecialShow"), s0 + 1, "r3's StaticPopupSpecial_Show hook runs the newer code")
+    WoW.closeDialog(special)
+    check(A:HideGameUI(win), "  hidden again")
+
+    local e0 = mark("OnEvent")
     WoW.fire("READY_CHECK", "Leader", 30)
-    check(UIParent:IsShown() and A:IsActive() and A:IsOwner(), "a ready check (r3's event frame) reveals the UI")
+    eq(mark("OnEvent"), e0 + 1, "r3's event frame runs the newer OnEvent")
+    check(UIParent:IsShown() and A:IsActive(), "  a ready check reveals the UI")
     WoW.fire("READY_CHECK_FINISHED")
-    check(A:HideGameUI(win), "r3's instance hides it again through the newer code")
-    SetUIVisibility(true)                       -- Escape (r3's hook)
+    check(A:HideGameUI(win), "  hidden again once it ends")
+
+    local v0, x0 = mark("OnSetUIVisibility"), mark("Exit")
+    SetUIVisibility(true)                       -- Escape, through r3's hook
+    check(mark("OnSetUIVisibility") > v0, "r3's SetUIVisibility hook runs the newer code")
     eq(forced[#forced], "ui-shown", "Escape reaches r3's instance as onForcedExit")
+    eq(exited[#exited], true, "  and the consumer's own A:Exit succeeds")
+    check(mark("Exit") > x0, "  through the newer Exit")
+    local o0 = mark("OnUpdate")
+    WoW.tick(0.1, 1)
+    eq(mark("OnUpdate"), o0 + 1, "r3's OnUpdate script runs the newer OnUpdate (the exit animation)")
     WoW.tick(0.1, 10)
     check(not A:IsActive() and not A:IsOwner(), "its exit finishes and releases")
-    local same = true
-    for k, v in pairs(found) do if WoW.cvars[k] ~= v then same = false end end
-    check(same, "every CVar is back as r3 found it")
+    local same, which = sameCVars(found, WoW.cvars)
+    check(same, "every CVar is back as r3 found it, none added: " .. tostring(which))
     eq(DB.LibShowcaseCapture, nil, "and the capture is cleared")
     check(B:Enter(newWindow()), "the newer instance presents now")
     B:ForceRestore()
@@ -309,18 +361,19 @@ do
     local lib = loadCopy(NEWER_THAN_R3, "AltStable")
     local A = lib:New({ owner = "AltStable" })
     check(A:Enter(newWindow()), "the newer copy presents")
-    local impl, enter, frames, calls = lib.impl, lib.impl.Enter, #WoW.frames, #WoW.calls
+    local held = shared(lib)
+    local enter, methodEnter, ready = lib.impl.Enter, lib.methods.Enter, lib.ready
+    local frames, calls = #WoW.frames, #WoW.calls
     local widgets = allWidgets()
     local before = logSizes(widgets)
     eq(loadCopy(releasedCopy(R3), "PortalRoulette"), lib, "r3 loaded after it gets the newer library")
     eq(activeMinor(), NEWER_MINOR, "  which stays active")
-    check(lib.impl == impl and lib.impl.Enter == enter, "  its code untouched")
+    eq(lib.ready, ready, "  its completion marker untouched")
+    checkKept(lib, held, "newer then r3")
+    check(lib.impl.Enter == enter and lib.methods.Enter == methodEnter, "  its code and methods untouched")
     eq(#WoW.frames, frames, "  no frame created")
     eq(#WoW.calls, calls, "  no camera, CVar or UI call")
-    local after = logSizes(widgets)
-    local touched = 0
-    for i, n in ipairs(before) do if after[i] ~= n then touched = touched + 1 end end
-    eq(touched, 0, "  no widget call")
+    eq(touchedSince(before, widgets), 0, "  no widget call")
     check(A:IsActive(), "  and the presentation runs on")
     A:ForceRestore()
 end
