@@ -26,7 +26,7 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 | `SC:Acquire()` / `SC:Release()` | Hold the lease without a camera (a camera-OFF consumer); `Release` restores everything first. |
 | `SC:HideGameUI(anchor?)` / `SC:RestoreGameUI()` | `SetUIVisibility(false/true)`, lifting `anchor` and GameTooltip. Restoring drops every lift. `HideGameUI` returns `false, "combat" \| "unsupported" \| "busy" \| "dialog"` (a Blizzard dialog is up: the UI stays up). With the UI already hidden, it only lifts `anchor`. `Enter` hides the UI the same way, and presents with the UI up when it can't (check `IsGameUIHidden()`). |
 | `SC:IsGameUIHidden()` | Whether the library has the UI hidden (shared truth, any owner). |
-| `SC:Lift(frame, strata?)` / `SC:Drop(frame)` / `SC:IsLifted(frame)` | Take one of the consumer's **own** frames out from under UIParent (scale compensated, idempotent) and put it back. Never a Blizzard frame (a StaticPopup above all: see Blizzard dialogs). The library itself lifts GameTooltip, inherited from AltStable; whether that taints is an open measurement. |
+| `SC:Lift(frame, strata?)` / `SC:Drop(frame)` / `SC:IsLifted(frame)` | Take one of the consumer's **own** frames out from under UIParent (scale compensated, idempotent) and put it back. Never a Blizzard frame (a StaticPopup above all: see Blizzard dialogs). The library itself lifts GameTooltip (inherited from AltStable; measured not to taint it: Guarantees). |
 | `SC:LiftPopup(dialog)` | "Reveal for a dialog": while this instance holds the lease with the UI hidden, brings the game UI back as a dialog appearing does (Guarantees). Returns the dialog **untouched**; does nothing otherwise. |
 | `SC:DropPopup(dialog)` | A no-op, kept for API stability. |
 
@@ -120,6 +120,14 @@ owner.
   (`onGameUIShown("dialog")`, presentation active, lease held), the `PARTY_INVITE` dialog's
   `which` read secure (`issecurevariable`), accepting it worked, and the later `QUIT` dialog was
   secure and quit the game.
+- **GameTooltip and the chat edit box** (both touched by `HideUI`, as AltStable did: GameTooltip
+  lifted, an open edit box closed with `ChatEdit_DeactivateChat`) come out untainted. MEASURED
+  70205 (`/lsprobe taint` before and after three presentations, one opened mid-typing): every
+  GameTooltip field secure; `ACTIVE_CHAT_EDIT_BOX` and `LAST_ACTIVE_CHAT_EDIT_BOX` secure; no
+  edit-box field newly tainted. (`ChatFrame1EditBox` always reads shown, so the close ran each
+  time. Its `autoCompleteParams` read tainted by the probe already in the baseline, before any
+  presentation: typing an addon's slash command does that.) `issecurevariable` sees Lua fields,
+  not the client's internal state.
 - **Consumers must never call `StaticPopup_Show` for their own prompts: use their own frames.**
   `SC:Lift` is for the consumer's own frames, never a Blizzard one.
 - **Crash self-heal:** `Enter` writes the capture (view slot, zoom, every CVar it changes, the
@@ -189,9 +197,7 @@ newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (81 muta
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
-| Does lifting GameTooltip (`SetParent(nil)`, `SetFrameStrata`, `SetScale`, then back) taint it? | `/lsprobe taint`, `/lsprobe show`, Escape, `/lsprobe taint` |
-| Does closing an open chat edit box (`ChatEdit_DeactivateChat` from addon code) taint the edit box or `ACTIVE_CHAT_EDIT_BOX`? | `/lsprobe taint`, `/lsprobe show 5` (open chat and type meanwhile), Escape, `/lsprobe taint` |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
 securely (`issecurevariable`), and `/lsprobe focus` lists the tainted fields of the frame under the
-mouse: re-run `/lsprobe invite` and `/lsprobe rereg` when the build changes.
+mouse: re-run `/lsprobe invite`, `/lsprobe rereg` and `/lsprobe taint` when the build changes.
