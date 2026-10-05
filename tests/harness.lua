@@ -69,6 +69,15 @@ function loadCopy(copy, host)
     return LibStub("LibShowcase-1.0")
 end
 
+-- A released copy: the files the XML lists, LibShowcase.lua replaced by a
+-- frozen one (tests/fixtures/LibShowcase-rN.lua, byte for byte the tag's).
+function releasedCopy(path)
+    return copyOf(function(file, src)
+        if file ~= "LibShowcase.lua" then return src end
+        return (readFile(path):gsub("\r\n", "\n"))
+    end)
+end
+
 -- A fresh client with this checkout embedded in `host`.
 function freshLibrary(host)
     WoW.reset()

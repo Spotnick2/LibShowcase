@@ -177,7 +177,8 @@ methods in `lib.methods` (a plain table, the instances' `__index`) dispatch to `
 time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer callbacks; every table keeps its
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
-newer copy loaded mid-presentation; `tests/mutate.lua` breaks each rule (87 mutations, all red).
+newer copy loaded mid-presentation, and with the released r3 (`tests/fixtures/LibShowcase-r3.lua`, byte for
+byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (87 mutations, all red).
 
 ## Deliberate differences from AltStable's block
 

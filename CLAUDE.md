@@ -101,7 +101,8 @@ every `tests\test_*.lua`), `tests\mutate.lua` (mutation run; not part of the sui
 - **Behaviour parity:** `tests/test_parity.lua` runs AltStable's original block (frozen as
   `tests/fixtures/altstable_camera.lua`, `SheetUI.lua:196-911` @ AltStable `5297196`) and the
   library through the same scenarios and compares every camera, CVar and UI call in order.
-- Must cover: upgrade (r1: a synthetic newer copy), isolation (two instances), single owner,
+- Must cover: upgrade (a synthetic newer copy, and each released copy frozen as
+  `tests/fixtures/LibShowcase-rN.lua` loaded under the current one, both orders), isolation (two instances), single owner,
   the camera-OFF lease, combat during cleanup, a protected frame's deferred drop, the crash
   self-heal round trip, Blizzard dialogs (never touched; the UI brought back, the presentation
   kept), widget methods against the dump.
