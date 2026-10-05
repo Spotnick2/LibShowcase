@@ -116,6 +116,9 @@ owner.
   its Show already happened, so nothing would bring it back (`HideGameUI` returns
   `false, "dialog"`; `Enter` presents with the UI up). That covers a prompt started before `Enter`,
   and a `HideGameUI` right after a prompt revealed the UI.
+  MEASURED 70205: a real ready check while presenting brought the UI back
+  (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
+  through `READY_CHECK`.
   MEASURED 70205 (`/lsprobe invite`): a real party invite while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held), the `PARTY_INVITE` dialog's
   `which` read secure (`issecurevariable`), accepting it worked, and the later `QUIT` dialog was
