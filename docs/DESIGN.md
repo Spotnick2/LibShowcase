@@ -183,7 +183,8 @@ owner.
   players, guild/title lines, pets/minions and NPCs (through `UnitNameNPC`) all gone; Escape
   restored all 21 logged values (the list plus `UnitSurnameOwn`, `UnitNamePlayerGuild`,
   `UnitNamePlayerPVPTitle`, `UnitNameGuildTitle`, `UnitNameForceHideMinus`, never written) exactly,
-  and a `/reload` kept them. Camera OFF (`/lsprobe names ui`: `Acquire` + `HideGameUI`) the same:
+  and a `/reload` kept them (checked again after the camera-OFF run; a full client restart was not
+  run separately: a `/reload` also goes through `PLAYER_LOGOUT`). Camera OFF (`/lsprobe names ui`: `Acquire` + `HideGameUI`) the same:
   names gone while the UI was hidden, all back on closing. Not separated: which entries are strictly needed (the flags already off
   were not exercised; the whole list is kept, as writing an entry that exists and is on is harmless).
   - **When:** while the owner's presentation runs (`Enter` to the end of the exit animation; with
@@ -271,7 +272,6 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
-| World names after a full client restart (#14; 70338 measured the presentation, camera OFF, Escape and `/reload`: Guarantees) | `/lsprobe names list` after a restart |
 | The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/lsprobe prompts` with a ready check (or a loot roll) waiting, then after answering |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
