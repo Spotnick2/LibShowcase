@@ -15,9 +15,9 @@ Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\`
 **Status (2026-10-10): `r4` released** (MINOR 4, annotated tag on `195d714`: opt-in
 `hideWorldNames`, #14/#15; r3 on `283914d`; r1 and r2 were never tagged), public at
 github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones externals
-anonymously). MIT. Consumers, each pinning `tag: r3` in its `.pkgmeta`: **AltStable**,
-**PortalRoulette** (Spotnick2/PortalRoulette#1) and **123** (which will opt into `hideWorldNames`
-with r4). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
+anonymously). MIT. Consumers (the `.pkgmeta` pin): **AltStable** (`tag: r3`), **PortalRoulette**
+(`tag: r3`, Spotnick2/PortalRoulette#1) and **123** (`tag: r4`, `NEEDS_MINOR = 4`: it uses
+`hideWorldNames`). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
 requests here.
 
 ## Layout
