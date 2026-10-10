@@ -240,8 +240,9 @@ methods in `lib.methods` (a plain table, the instances' `__index`) dispatch to `
 time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer callbacks; every table keeps its
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
-newer copy loaded mid-presentation, and with the released r3, whole (`tests/fixtures/LibShowcase-r3/`: its XML, LibShowcase.lua and LibStub, byte for
-byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (110 mutations, all red).
+newer copy loaded mid-presentation, and with each released copy, whole (`tests/fixtures/LibShowcase-r3/`,
+`-r4/`: its XML, LibShowcase.lua and LibStub, byte for byte the tag's) under a newer copy, in both
+orders (r4's instance with its world names hidden: the newer code puts them back); `tests/mutate.lua` breaks each rule (110 mutations, all red).
 An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_names.lua`).
 
 ## Deliberate differences from AltStable's block
