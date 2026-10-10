@@ -12,11 +12,12 @@ takes PortalRoulette's `Camera/CameraMode.lua` extras as opt-in options.
 Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\` through
 `.pkgmeta` externals, and LibStub runs the newest copy loaded.
 
-**Status (2026-10-05): `r3` released** (MINOR 3, annotated tag on `283914d`; r1 and r2 were never
-tagged), public at github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones
-externals anonymously). MIT. Consumers: **PortalRoulette** pins `tag: r3`
-(Spotnick2/PortalRoulette#1). **AltStable** does not consume it yet; its migration is
-Spotnick2/AltStable#199. `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
+**Status (2026-10-10): `r4` released** (MINOR 4, annotated tag on `195d714`: opt-in
+`hideWorldNames`, #14/#15; r3 on `283914d`; r1 and r2 were never tagged), public at
+github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones externals
+anonymously). MIT. Consumers, each pinning `tag: r3` in its `.pkgmeta`: **AltStable**,
+**PortalRoulette** (Spotnick2/PortalRoulette#1) and **123** (which will opt into `hideWorldNames`
+with r4). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
 requests here.
 
 ## Layout
@@ -88,10 +89,12 @@ These follow `C:\Projects\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fac
 
 As LibGlass: raise `MINOR` for every behaviour change in the same PR, tag the merge commit
 `r<MINOR>`, never move a tag. Consumers pin `tag: rN` and bump only in a release they make anyway,
-and repeat this repo's non-dot ignores under `Libs/LibShowcase-1.0/`. Before tagging: each
-consumer's tests against this checkout (`$env:LIBSHOWCASE`, `pwsh ..\PortalRoulette\tests\run.ps1`;
-AltStable's too once it consumes the library) and an in-game check. After tagging: freeze the
-release, whole, as `tests/fixtures/LibShowcase-rN/` (as r3 was, #10). No library CHANGELOG.
+and repeat this repo's non-dot ignores under `Libs/LibShowcase-1.0/`. Before tagging: **every**
+consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\LibShowcase'`, then
+`pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
+`pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
+whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
+(r3: #10; r4: #16). No library CHANGELOG.
 
 ## Testing
 
