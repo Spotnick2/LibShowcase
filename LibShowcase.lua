@@ -123,8 +123,9 @@ lib.RACE_IDS = fill(lib.RACE_IDS or {}, {
 -- off: the "show name" CVars FrameXML 70338's Names settings
 -- (Blizzard_SettingsDefinitions_Frame/Nameplates.lua; "Hostle" is the
 -- client's spelling) and Blizzard_Commentator's pet/guardian/totem flags.
--- Not nameplates. Only those the client has are touched. CANDIDATES: which
--- of them the client needs is measured with /lsprobe names.
+-- Not nameplates. Only those the client has are touched. MEASURED 70338
+-- (/lsprobe names): all exist, and set to "0" no name text is left in the
+-- world (docs/DESIGN.md).
 lib.WORLD_NAME_CVARS = fill(lib.WORLD_NAME_CVARS or {}, {
     "UnitNameOwn",
     "UnitNameFriendlyPlayerName",

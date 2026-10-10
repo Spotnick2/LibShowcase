@@ -177,8 +177,14 @@ owner.
   `UnitNameFriendlyPlayerName`, `UnitNameFriendlyMinionName`, `UnitNameEnemyPlayerName`,
   `UnitNameEnemyMinionName`, `UnitNameNPC`, `UnitNameFriendlySpecialNPCName`, `UnitNameHostleNPC`
   (the client's spelling), `UnitNameInteractiveNPC`, `UnitNameNonCombatCreatureName`) and
-  Blizzard_Commentator's pet/guardian/totem flags: **candidates, not measured** (Open
-  measurements).
+  Blizzard_Commentator's pet/guardian/totem flags. MEASURED 70338 (`/lsprobe names`, a crowded
+  place): all 16 exist; with the 11 that were on set to `"0"` (own name and the special, hostile,
+  interactive and non-combat NPC flags already off), **no name text was left in the world**:
+  players, guild/title lines, pets/minions and NPCs (through `UnitNameNPC`) all gone; Escape
+  restored all 21 logged values (the list plus `UnitSurnameOwn`, `UnitNamePlayerGuild`,
+  `UnitNamePlayerPVPTitle`, `UnitNameGuildTitle`, `UnitNameForceHideMinus`, never written) exactly,
+  and a `/reload` kept them. Not separated: which entries are strictly needed (the flags already off
+  were not exercised; the whole list is kept, as writing an entry that exists and is on is harmless).
   - **When:** while the owner's presentation runs (`Enter` to the end of the exit animation; with
     `hideUI = false` too), and camera OFF while its `HideGameUI` has the UI hidden. The option is
     read with the others at `Enter` (the presentation keeps that value), and live for `HideGameUI`.
@@ -264,7 +270,7 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
-| Which `WORLD_NAME_CVARS` exist on Forever, and which are needed: do player, pet/minion and NPC names, guild/title lines, regional surnames and pet-owner text disappear in a crowded place, and is every value back after the close, a `/reload` and a restart? (#14) | `/lsprobe names`, `/lsprobe names ui`, `/lsprobe names list` |
+| World names, the rest (#14; 70338 measured the presentation, Escape and `/reload`: Guarantees): the camera-OFF path, and the values after a full client restart | `/lsprobe names ui`, then `/lsprobe names list` after a restart |
 | The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/lsprobe prompts` with a ready check (or a loot roll) waiting, then after answering |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
