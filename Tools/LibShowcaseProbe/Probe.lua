@@ -55,6 +55,12 @@ local db
 local SC
 local saved = {}             -- CVar -> value before the probe touched it
 
+-- Every chat line starts with "[LSProbe]" (the colour codes sit outside it),
+-- so a chat filter can match it.
+local function Print(text)
+    print("|cff88ccff[LSProbe]|r " .. text)
+end
+
 local function Log(text)
     local line = ("%s %s"):format(date("%H:%M:%S"), text)
     if db then
@@ -62,7 +68,7 @@ local function Log(text)
         table.insert(db.log, line)
         while #db.log > 2000 do table.remove(db.log, 1) end
     end
-    print("|cff88ccffLSProbe|r " .. text)
+    Print(text)
 end
 
 local function Save(cvar)
@@ -441,9 +447,9 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "focus" then Focus()
     elseif cmd == "next" then Next()
     elseif cmd == "restore" then RestoreAll()
-    elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
+    elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do Print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
+        Print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end
