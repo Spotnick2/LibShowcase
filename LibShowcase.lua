@@ -318,7 +318,7 @@ end
 -- Every path that ends a presentation or brings the UI back comes through
 -- here, so the world names go back here too.
 function I.MaybeRelease()
-    I.SyncNames()
+    I.SyncNames(true)
     if st.owner ~= nil and not st.explicit and I.Idle() then
         st.owner = nil
     end
@@ -549,19 +549,28 @@ function I.NamesWanted()
     return st.uiHidden and inst.opts.hideWorldNames == true and inst or nil
 end
 
--- Put a capture back (a restore, or a heal): sorted, for a stable order. A
--- heal's capture may name a CVar this client lacks: writing it would create it.
+-- Put a capture back (a restore, or a heal), in the list's order. Only the
+-- listed name CVars, and only those this client has: a heal's capture comes
+-- from SavedVariables (hand-edited, another build), and writing an absent
+-- CVar would create it.
 function I.RestoreNames(cap)
     if type(GetCVar) ~= "function" or type(SetCVar) ~= "function" then return end
-    local cvars = {}
-    for cvar, value in pairs(cap) do
-        if type(cvar) == "string" and (type(value) == "string" or type(value) == "number")
-            and GetCVar(cvar) ~= nil then
-            cvars[#cvars + 1] = cvar
+    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do
+        local value = cap[cvar]
+        if (type(value) == "string" or type(value) == "number") and GetCVar(cvar) ~= nil then
+            pcall(SetCVar, cvar, value)
         end
     end
-    table.sort(cvars)
-    for _, cvar in ipairs(cvars) do pcall(SetCVar, cvar, cap[cvar]) end
+end
+
+-- A capture an earlier session left in `db`: put back and cleared.
+function I.HealNames(inst, db)
+    local cap = db[lib.NAMES_DB_KEY]
+    if type(cap) ~= "table" then return false end
+    I.RestoreNames(cap)
+    db[lib.NAMES_DB_KEY] = nil
+    I.Debug(inst, "restored the world names a previous session left hidden")
+    return true
 end
 
 -- Only through SyncNames, which never takes a second capture.
@@ -570,16 +579,15 @@ function I.HideNames(inst)
     -- A capture an earlier session left (HideGameUI does not heal) goes back
     -- first, or the zeroes it left would be read as the player's.
     local db = I.DB(inst)
-    if db and type(db[lib.NAMES_DB_KEY]) == "table" then
-        I.RestoreNames(db[lib.NAMES_DB_KEY])
-        db[lib.NAMES_DB_KEY] = nil
-    end
+    if db then I.HealNames(inst, db) end
     local cap, n = {}, 0
     for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do
         local v = GetCVar(cvar)
         if v ~= nil and v ~= "0" then cap[cvar] = v; n = n + 1 end
     end
-    st.names = { inst = inst, capture = cap }
+    -- The db table itself is kept: the restore clears the capture from it
+    -- even if the consumer's db function no longer answers then.
+    st.names = { inst = inst, capture = cap, db = db }
     if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end
     for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do
         if cap[cvar] then pcall(SetCVar, cvar, "0") end
@@ -592,14 +600,16 @@ function I.ShowNames()
     if not names then return end
     st.names = nil
     I.RestoreNames(names.capture)
-    local db = I.DB(names.inst)
-    if db and db[lib.NAMES_DB_KEY] == names.capture then db[lib.NAMES_DB_KEY] = nil end
+    local db = names.db
+    if type(db) == "table" and db[lib.NAMES_DB_KEY] == names.capture then db[lib.NAMES_DB_KEY] = nil end
     I.Debug(names.inst, "world names restored")
 end
 
-function I.SyncNames()
+-- `restoreOnly` (the release check): never starts a capture, so an unrelated
+-- Drop or failed Lift cannot hide names mid-session.
+function I.SyncNames(restoreOnly)
     local inst = I.NamesWanted()
-    if inst and not st.names then
+    if inst and not st.names and not restoreOnly then
         I.HideNames(inst)
     elseif not inst and st.names then
         I.ShowNames()
@@ -1289,13 +1299,7 @@ function I.Heal(inst)
     end
     -- Not while this instance has the names hidden (HideGameUI, then Enter):
     -- the capture in the db is then the live one.
-    local names = db[lib.NAMES_DB_KEY]
-    if type(names) == "table" and not st.names then
-        I.RestoreNames(names)
-        db[lib.NAMES_DB_KEY] = nil
-        I.Debug(inst, "restored the world names a previous session left hidden")
-        healed = true
-    end
+    if not st.names and I.HealNames(inst, db) then healed = true end
     return healed
 end
 

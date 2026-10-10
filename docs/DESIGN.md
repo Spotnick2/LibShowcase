@@ -195,12 +195,18 @@ owner.
     first write, written to `db.LibShowcaseNames` first, and taken **once**: a second `Enter`, or
     `HideGameUI` then `Enter`, keeps the first; re-entering during the exit animation restores, then
     captures afresh, so the zeroes are never taken for the player's.
+  - **The release check only restores:** it never starts a capture, so an unrelated `Drop` or failed
+    `Lift` after the consumer changed `opts.hideWorldNames` cannot hide names mid-session.
   - **The player's changes meanwhile:** a name turned on stays on (one that was off is not
     captured; one that was on goes back on). One turned off reads as the library's `"0"` and goes
     back to its value from before. The CVars are booleans, so that is every case.
-  - **Never in a lockdown:** `Enter` and `HideGameUI` refuse in combat, and combat restores at
-    `PLAYER_REGEN_DISABLED` (unlocked), so the CVars are never written in combat. (Whether they are
-    protected there is not measured; `/lsprobe names` logs their `isSecure` flag.)
+  - **Combat:** `Enter` and `HideGameUI` refuse in combat, and combat restores at
+    `PLAYER_REGEN_DISABLED` (unlocked), so the library's own paths never write the CVars in a
+    lockdown. Not guaranteed against a consumer that calls `Enter` from its own
+    `PLAYER_REGEN_DISABLED` handler after the library's (`InCombatLockdown()` is still false
+    there): the presentation then outlives the restore, camera and names alike (a gap that predates
+    this option). MEASURED 70338 (`/lsprobe names list`): every `WORLD_NAME_CVARS` entry exists, none
+    `isSecure`, `isLockedFromUser` or `isReadOnly`.
   - **The lease:** written only by the owner, inside its lease; a refused `Enter`/`HideGameUI`
     writes nothing, and another instance's stale names capture is not healed under someone else's
     lease.
@@ -208,8 +214,14 @@ owner.
     `db.LibShowcaseCapture` keeps r3's shape (an r3 copy healing it finds what it knows; an r3 copy
     leaves the names key alone). It heals with the camera one (`PLAYER_LOGIN`, `New` after login,
     the instance's next `Enter`) and before a `HideGameUI` capture; not while this instance has the
-    names hidden (that capture is live). A malformed entry is skipped. The same limit as the camera
-    capture: `PLAYER_LOGOUT` restores and clears it before SavedVariables are written.
+    names hidden (that capture is live). A heal writes only `WORLD_NAME_CVARS` entries the client
+    has, with a string or number value: a hand-edited capture cannot set another CVar. The restore
+    clears the capture from the db table it was written to (kept in `st.names`), even if the
+    consumer's db function no longer answers. **The same limit as the camera capture:**
+    `PLAYER_LOGOUT` restores and clears it before SavedVariables are written, and a crash writes
+    none, so after a real crash there is nothing to heal. If the client keeps the names' `"0"`
+    across a crash (Config.wtf, or server-stored CVars: not measured), the player turns them back on
+    in the settings.
 - **The OnUpdate runner hangs from WorldFrame**: `SetUIVisibility(false)` hides UIParent's
   children, and a hidden frame's OnUpdate stops.
 
@@ -221,7 +233,7 @@ time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer c
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
 newer copy loaded mid-presentation, and with the released r3, whole (`tests/fixtures/LibShowcase-r3/`: its XML, LibShowcase.lua and LibStub, byte for
-byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (107 mutations, all red).
+byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (110 mutations, all red).
 An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_names.lua`).
 
 ## Deliberate differences from AltStable's block

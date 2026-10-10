@@ -253,6 +253,37 @@ do
 end
 
 ------------------------------------------------------------------------------
+-- Review fixes: the release check never starts a capture; a db function that
+-- stops answering still gets its capture cleared.
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    setNames()
+    local SC = lib:New({ owner = "A" })
+    local win = newWindow()
+    SC:Acquire()
+    SC:HideGameUI()
+    SC:Lift(win)
+    SC.opts.hideWorldNames = true                 -- set for a later session
+    local mark = #WoW.calls
+    SC:Drop(win)                                  -- goes through the release check
+    eq(nameWrites(mark), 0, "an unrelated Drop does not hide names mid-session")
+    SC:Release()
+
+    lib = freshLibrary()
+    setNames()
+    local DB = {}
+    local answer = true
+    SC = lib:New({ owner = "A", hideWorldNames = true, db = function() return answer and DB or nil end })
+    SC:Enter(newWindow())
+    check(DB.LibShowcaseNames ~= nil, "the capture is in the db")
+    answer = false                                -- e.g. a profile switch
+    SC:ForceRestore()
+    namesAre(lib, MIXED, "the names come back")
+    eq(DB.LibShowcaseNames, nil, "  and the capture is cleared from the db it was written to")
+end
+
+------------------------------------------------------------------------------
 -- The lease: a refused instance writes nothing, heals nothing.
 ------------------------------------------------------------------------------
 do
@@ -321,13 +352,15 @@ do
     setNames()
     WoW.cvars.CameraKeepCharacterCentered = "0"
     local DB3 = { LibShowcaseCapture = { CameraKeepCharacterCentered = "1" },
-                  LibShowcaseNames = { UnitNameOwn = {}, [1] = "1", UnitNameEnemyTotemName = "1" } }
+                  LibShowcaseNames = { UnitNameOwn = {}, [1] = "1", UnitNameEnemyTotemName = "1",
+                                       CameraReduceUnexpectedMovement = "1" } }
     lib:New({ owner = "A", db = DB3 })
     local mark = #WoW.calls
     WoW.fire("PLAYER_LOGIN")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "the r3 capture shape still heals")
     eq(nameWrites(mark), 0, "  a malformed names capture writes nothing")
     eq(WoW.cvars.UnitNameEnemyTotemName, nil, "  nor creates a CVar this client lacks")
+    eq(WoW.cvars.CameraReduceUnexpectedMovement, "0", "  nor writes a CVar outside WORLD_NAME_CVARS")
     eq(DB3.LibShowcaseNames, nil, "  and is dropped")
 end
 

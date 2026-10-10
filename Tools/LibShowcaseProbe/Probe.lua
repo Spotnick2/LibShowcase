@@ -335,15 +335,30 @@ local function Names(arg)
         return
     end
     if arg == "list" then LogNames("now"); return end
+    -- A presentation already running keeps the option it entered with.
+    if window and window:IsShown() then
+        Log("  a presentation is already open: close it first (/lsprobe show), then /lsprobe names")
+        return
+    end
     Log("== names " .. (arg == "ui" and "ui (camera OFF)" or "(presentation)") .. ": build " .. select(2, GetBuildInfo()))
     LogNames("before")
     SC.opts.hideWorldNames = true
     if arg == "ui" then
-        SC:Acquire()
-        Log(("  HideGameUI -> %s"):format(tostring(SC:HideGameUI())))
+        local ok, why = SC:Acquire()
+        if ok then ok, why = SC:HideGameUI() end
+        Log(("  Acquire + HideGameUI -> %s %s"):format(tostring(ok), tostring(why)))
+        if not ok then
+            SC:Release()
+            SC.opts.hideWorldNames = false
+            return
+        end
         namesOpen = "ui"
     else
-        if not (window and window:IsShown()) then Show() end
+        Show()
+        -- Enter has read the option (a presentation keeps what it entered
+        -- with): off again, so a later /lsprobe show or Escape leaves no trace.
+        SC.opts.hideWorldNames = false
+        if not window:IsShown() then return end
         namesOpen = "show"
     end
     LogNames("hidden")
