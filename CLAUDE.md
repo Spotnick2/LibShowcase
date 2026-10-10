@@ -94,7 +94,11 @@ consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\LibShow
 `pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
 `pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
 whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
-(r3: #10; r4: #16). No library CHANGELOG.
+(r3: #10; r4: #16), and publish a GitHub Release for the tag (#13):
+`gh release create rN --verify-tag --latest --title "rN: <what changed>" --notes-file <notes>`.
+The notes are written by hand, not generated: what changed, whether a consumer must do anything
+(nothing / pin `tag: rN` to use the new option / new runtime files or ignores), and anything
+MEASURED behind it. r3 and r4 are the models. The releases are the changelog: no CHANGELOG file.
 
 ## Testing
 
