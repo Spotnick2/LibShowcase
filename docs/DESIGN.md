@@ -32,7 +32,9 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 
 Library functions (dot): `lib.SuppressExperimentalCVarPopup()` (returns a count),
 `lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?)`. Public tables, filled in place:
-`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`.
+`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
+`lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`) and
+`lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4).
 
 ### Options
 
@@ -62,6 +64,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `dynamicPitch` | false | `test_cameraDynamicPitch` = 1 (see Open measurements) |
 | `pitchLimit` | nil | `ConsoleExec("pitchlimit N")`, `pitchlimit 88` on restore |
 | `viewBlendStyle` | nil | `cameraViewBlendStyle` |
+| `hideWorldNames` | false | MINOR 4: world name text off while the showcase is up (Guarantees, World names) |
 
 ## One owner: the lease
 
@@ -167,6 +170,66 @@ owner.
   `lib.impl.UnsuppressPopup` stays as a no-op: an r2 copy's pending `C_Timer` callback calls it.
   AltStable's frame walk (`GetFramesRegisteredForEvent`, varargs) is only the fallback when
   `GameEvent` is absent.
+- **World names (`hideWorldNames`, MINOR 4, opt-in; off, nothing changes).** Player, pet/minion and
+  NPC names drawn in the world stay up with the game UI hidden; an opted-in owner's showcase sets
+  the "show name" CVars of `lib.WORLD_NAME_CVARS` to `"0"`. Nameplates are a separate feature and
+  untouched. The list is FrameXML 70338's Names settings (`UnitNameOwn`,
+  `UnitNameFriendlyPlayerName`, `UnitNameFriendlyMinionName`, `UnitNameEnemyPlayerName`,
+  `UnitNameEnemyMinionName`, `UnitNameNPC`, `UnitNameFriendlySpecialNPCName`, `UnitNameHostleNPC`
+  (the client's spelling), `UnitNameInteractiveNPC`, `UnitNameNonCombatCreatureName`) and
+  Blizzard_Commentator's pet/guardian/totem flags. MEASURED 70338 (`/lsprobe names`, a crowded
+  place): all 16 exist; with the 11 that were on set to `"0"` (own name and the special, hostile,
+  interactive and non-combat NPC flags already off), **no name text was left in the world**:
+  players, guild/title lines, pets/minions and NPCs (through `UnitNameNPC`) all gone; Escape
+  restored all 21 logged values (the list plus `UnitSurnameOwn`, `UnitNamePlayerGuild`,
+  `UnitNamePlayerPVPTitle`, `UnitNameGuildTitle`, `UnitNameForceHideMinus`, never written) exactly,
+  and a `/reload` kept them (checked again after the camera-OFF run; a full client restart was not
+  run separately: a `/reload` also goes through `PLAYER_LOGOUT`). Camera OFF (`/lsprobe names ui`: `Acquire` + `HideGameUI`) the same:
+  names gone while the UI was hidden, all back on closing. Not separated: which entries are strictly needed (the flags already off
+  were not exercised; the whole list is kept, as writing an entry that exists and is on is harmless).
+  - **When:** while the owner's presentation runs (`Enter` to the end of the exit animation; with
+    `hideUI = false` too), and camera OFF while its `HideGameUI` has the UI hidden. The option is
+    read with the others at `Enter` (the presentation keeps that value), and live for `HideGameUI`.
+  - **Ends with the showcase:** whatever ends it puts the names back: `Exit` (at the end of the
+    animation, with the other CVars), Escape/Alt+Z, `ForceRestore`, `Release`, `RestoreGameUI`,
+    combat (`PLAYER_REGEN_DISABLED`, still unlocked), `PLAYER_LOGOUT` (so `/reload` and quitting),
+    `PLAYER_ENTERING_WORLD`. All of them pass through the lease's release check, which restores
+    the names once nothing wants them hidden.
+  - **A dialog revealing the UI** keeps a presentation's names off (the presentation goes on);
+    camera OFF the hidden UI was the showcase, so its names come back with it, and a later
+    `HideGameUI` takes a fresh capture.
+  - **The capture:** only CVars the client has (`GetCVar` not nil: none is created) and that are not
+    already `"0"` (one already off is never written, so it keeps its value). Read whole before the
+    first write, written to `db.LibShowcaseNames` first, and taken **once**: a second `Enter`, or
+    `HideGameUI` then `Enter`, keeps the first; re-entering during the exit animation restores, then
+    captures afresh, so the zeroes are never taken for the player's.
+  - **The release check only restores:** it never starts a capture, so an unrelated `Drop` or failed
+    `Lift` after the consumer changed `opts.hideWorldNames` cannot hide names mid-session.
+  - **The player's changes meanwhile:** a name turned on stays on (one that was off is not
+    captured; one that was on goes back on). One turned off reads as the library's `"0"` and goes
+    back to its value from before. The CVars are booleans, so that is every case.
+  - **Combat:** `Enter` and `HideGameUI` refuse in combat, and combat restores at
+    `PLAYER_REGEN_DISABLED` (unlocked), so the library's own paths never write the CVars in a
+    lockdown. Not guaranteed against a consumer that calls `Enter` from its own
+    `PLAYER_REGEN_DISABLED` handler after the library's (`InCombatLockdown()` is still false
+    there): the presentation then outlives the restore, camera and names alike (a gap that predates
+    this option). MEASURED 70338 (`/lsprobe names list`): every `WORLD_NAME_CVARS` entry exists, none
+    `isSecure`, `isLockedFromUser` or `isReadOnly`.
+  - **The lease:** written only by the owner, inside its lease; a refused `Enter`/`HideGameUI`
+    writes nothing, and another instance's stale names capture is not healed under someone else's
+    lease.
+  - **Crash self-heal:** the names capture is its own key, `db.LibShowcaseNames`, so
+    `db.LibShowcaseCapture` keeps r3's shape (an r3 copy healing it finds what it knows; an r3 copy
+    leaves the names key alone). It heals with the camera one (`PLAYER_LOGIN`, `New` after login,
+    the instance's next `Enter`) and before a `HideGameUI` capture; not while this instance has the
+    names hidden (that capture is live). A heal writes only `WORLD_NAME_CVARS` entries the client
+    has, with a string or number value: a hand-edited capture cannot set another CVar. The restore
+    clears the capture from the db table it was written to (kept in `st.names`), even if the
+    consumer's db function no longer answers. **The same limit as the camera capture:**
+    `PLAYER_LOGOUT` restores and clears it before SavedVariables are written, and a crash writes
+    none, so after a real crash there is nothing to heal. If the client keeps the names' `"0"`
+    across a crash (Config.wtf, or server-stored CVars: not measured), the player turns them back on
+    in the settings.
 - **The OnUpdate runner hangs from WorldFrame**: `SetUIVisibility(false)` hides UIParent's
   children, and a hidden frame's OnUpdate stops.
 
@@ -178,7 +241,8 @@ time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer c
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
 newer copy loaded mid-presentation, and with the released r3, whole (`tests/fixtures/LibShowcase-r3/`: its XML, LibShowcase.lua and LibStub, byte for
-byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (87 mutations, all red).
+byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (110 mutations, all red).
+An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_names.lua`).
 
 ## Deliberate differences from AltStable's block
 

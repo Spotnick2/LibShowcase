@@ -41,6 +41,11 @@
 --                          boxes, and the chat globals: before and after one
 --   /lsprobe prompts       every return of the prompt getters the library
 --                          asks before hiding (a ready check waiting, then not)
+--   /lsprobe names [ui]    hideWorldNames: logs each name CVar (value, flags),
+--                          opens the presentation (ui: camera OFF, the UI
+--                          hidden) with names hidden; again to close, and the
+--                          values are logged after the restore. `names list`
+--                          only logs them (after a /reload, a restart)
 --   /lsprobe next          prints the /console line to type (a changing value)
 --   /lsprobe restore       puts every CVar this probe touched back
 --   /lsprobe log | clear
@@ -50,6 +55,12 @@ local db
 local SC
 local saved = {}             -- CVar -> value before the probe touched it
 
+-- Every chat line starts with "[LSProbe]" (the colour codes sit outside it),
+-- so a chat filter can match it.
+local function Print(text)
+    print("|cff88ccff[LSProbe]|r " .. text)
+end
+
 local function Log(text)
     local line = ("%s %s"):format(date("%H:%M:%S"), text)
     if db then
@@ -57,7 +68,7 @@ local function Log(text)
         table.insert(db.log, line)
         while #db.log > 2000 do table.remove(db.log, 1) end
     end
-    print("|cff88ccffLSProbe|r " .. text)
+    Print(text)
 end
 
 local function Save(cvar)
@@ -288,6 +299,78 @@ local function Prompts()
     end
 end
 
+-- 9. hideWorldNames (#14): which name CVars the client has, their values and
+-- flags, then a presentation with them hidden, in a crowded place. Look at
+-- player, pet/minion and NPC names, guild/title lines, regional surnames and
+-- pet-owner text: which stay up? Run it again to close; the values are logged
+-- once more after the restore and must match the first list.
+-- `/lsprobe names ui`: the same with the camera OFF (Acquire + HideGameUI).
+local NAME_EXTRAS = { "UnitSurnameOwn", "UnitNamePlayerGuild", "UnitNamePlayerPVPTitle",
+                      "UnitNameGuildTitle", "UnitNameForceHideMinus" }
+local namesOpen
+local function LogNames(tag)
+    local seen = {}
+    local function one(cvar)
+        if seen[cvar] then return end
+        seen[cvar] = true
+        local v = GetCVar(cvar)
+        if v == nil then Log(("  [%s] %s: ABSENT"):format(tag, cvar)); return end
+        local flags = ""
+        if C_CVar and C_CVar.GetCVarInfo then
+            local ok, _, def, _, _, locked, secure, readOnly = pcall(C_CVar.GetCVarInfo, cvar)
+            if ok then
+                flags = (" default=%s locked=%s secure=%s readOnly=%s"):format(tostring(def), tostring(locked),
+                    tostring(secure), tostring(readOnly))
+            end
+        end
+        Log(("  [%s] %s = %s%s"):format(tag, cvar, tostring(v), flags))
+    end
+    for _, cvar in ipairs(LibStub("LibShowcase-1.0").WORLD_NAME_CVARS) do one(cvar) end
+    for _, cvar in ipairs(NAME_EXTRAS) do one(cvar) end
+end
+
+local function Names(arg)
+    if namesOpen then
+        if namesOpen == "ui" then SC:Release() elseif window then window:Hide() end
+        namesOpen = nil
+        C_Timer.After(1.5, function()
+            SC.opts.hideWorldNames = false
+            LogNames("after")
+            Log("  every value must match [before]. Then /reload and /lsprobe names list: still the same?")
+        end)
+        return
+    end
+    if arg == "list" then LogNames("now"); return end
+    -- A presentation already running keeps the option it entered with.
+    if window and window:IsShown() then
+        Log("  a presentation is already open: close it first (/lsprobe show), then /lsprobe names")
+        return
+    end
+    Log("== names " .. (arg == "ui" and "ui (camera OFF)" or "(presentation)") .. ": build " .. select(2, GetBuildInfo()))
+    LogNames("before")
+    SC.opts.hideWorldNames = true
+    if arg == "ui" then
+        local ok, why = SC:Acquire()
+        if ok then ok, why = SC:HideGameUI() end
+        Log(("  Acquire + HideGameUI -> %s %s"):format(tostring(ok), tostring(why)))
+        if not ok then
+            SC:Release()
+            SC.opts.hideWorldNames = false
+            return
+        end
+        namesOpen = "ui"
+    else
+        Show()
+        -- Enter has read the option (a presentation keeps what it entered
+        -- with): off again, so a later /lsprobe show or Escape leaves no trace.
+        SC.opts.hideWorldNames = false
+        if not window:IsShown() then return end
+        namesOpen = "show"
+    end
+    LogNames("hidden")
+    Log("  Which names, guild/title lines, surnames or pet-owner text are still drawn? Note them, then /lsprobe names")
+end
+
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 local function Rereg(how)
     Log("== rereg " .. tostring(how) .. ": unregister, then register the handler this way")
@@ -357,15 +440,16 @@ SlashCmdList.LSPROBE = function(msg)
         end
     elseif cmd == "taint" then Taint()
     elseif cmd == "prompts" then Prompts()
+    elseif cmd == "names" then Names(arg)
     elseif cmd == "testcvar" then TestCVar()
     elseif cmd == "rereg" then Rereg(arg)
     elseif cmd == "dialogs" then DialogTaint("now")
     elseif cmd == "focus" then Focus()
     elseif cmd == "next" then Next()
     elseif cmd == "restore" then RestoreAll()
-    elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
+    elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do Print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
+        Print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end

@@ -47,8 +47,9 @@ function, option, default, public table or table key. A breaking change is `LibS
 - Library functions, **dot-called**: `lib.SuppressExperimentalCVarPopup()`,
   `lib.ShoulderOffsetFor(race, zoom, mounted?)`.
 - Public tables, filled in place: `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`,
-  `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`.
-- The crash-heal key in a consumer's `db` table: `LibShowcaseCapture`.
+  `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
+- The crash-heal keys in a consumer's `db` table: `LibShowcaseCapture` (the camera; keeps r3's
+  shape) and `LibShowcaseNames` (`hideWorldNames`).
 - **One owner.** The camera and the game UI are global, so `lib.state` holds one lease. Every
   mutation (UI hide, lift, camera, GameTooltip) needs it; another instance's calls are refused.
 

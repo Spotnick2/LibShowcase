@@ -155,6 +155,38 @@ local M = {
     { "the capture not written to the db", { { "    if db then db[lib.DB_KEY] = capture end\n", "" } } },
     { "the capture left in the db", { { "        if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end\n", "" } } },
     { "no heal at login", { { "        for _, inst in ipairs(lib.instances) do I.Heal(inst) end\n", "" } } },
+    -- World names (#14)
+    { "names hidden by default", { { "    hideWorldNames = false,\n    salute", "    hideWorldNames = true,\n    salute" } } },
+    { "names never hidden", { { "function I.HideNames(inst)\n", "function I.HideNames(inst)\n    do return end\n" } } },
+    { "a missing name CVar is created", { { '        if v ~= nil and v ~= "0" then cap[cvar] = v; n = n + 1 end',
+                                            '        if v ~= "0" then cap[cvar] = v or "1"; n = n + 1 end' } } },
+    { "a name already off is written", { { '        if v ~= nil and v ~= "0" then cap[cvar] = v; n = n + 1 end',
+                                           '        if v ~= nil then cap[cvar] = v; n = n + 1 end' } } },
+    { "names written before the capture is saved", {
+        { "    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end\n    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do\n        if cap[cvar] then pcall(SetCVar, cvar, \"0\") end\n    end\n",
+          "    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do\n        if cap[cvar] then pcall(SetCVar, cvar, \"0\") end\n    end\n    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end\n" } } },
+    { "a second hide recaptures the zeroes", { { "    if inst and not st.names and not restoreOnly then\n", "    if inst and not restoreOnly then\n" } } },
+    { "names not restored", { { "    I.RestoreNames(names.capture)\n", "" } } },
+    { "names follow the UI, not the presentation", {
+        { "        return cam.cfg and cam.cfg.hideWorldNames and inst or nil\n", "        return st.uiHidden and cam.cfg and cam.cfg.hideWorldNames and inst or nil\n" } } },
+    { "camera OFF never hides names", { { "    return st.uiHidden and inst.opts.hideWorldNames == true and inst or nil", "    return nil" } } },
+    { "the release does not restore names", { { "function I.MaybeRelease()\n    I.SyncNames(true)\n", "function I.MaybeRelease()\n" } } },
+    { "the release check hides names", { { "function I.MaybeRelease()\n    I.SyncNames(true)\n", "function I.MaybeRelease()\n    I.SyncNames()\n" } } },
+    { "the names capture left in the db", { { "    if type(db) == \"table\" and db[lib.NAMES_DB_KEY] == names.capture then db[lib.NAMES_DB_KEY] = nil end\n", "" } } },
+    { "the db asked again at restore", { { "    local db = names.db\n", "    local db = I.DB(names.inst)\n" } } },
+    { "no names heal", { { "    if not st.names and I.HealNames(inst, db) then healed = true end\n", "" } } },
+    { "the live names capture healed", { { "    if not st.names and I.HealNames(inst, db) then", "    if I.HealNames(inst, db) then" } } },
+    { "a stale names capture taken for the player's", { { "    if db then I.HealNames(inst, db) end\n", "" } } },
+    { "a malformed names capture written", { { '        if (type(value) == "string" or type(value) == "number") and GetCVar(cvar) ~= nil then',
+                                               "        if value ~= nil and GetCVar(cvar) ~= nil then" } } },
+    { "a healed name CVar is created", { { '        if (type(value) == "string" or type(value) == "number") and GetCVar(cvar) ~= nil then',
+                                           '        if (type(value) == "string" or type(value) == "number") then' } } },
+    { "the heal writes any CVar", { { "    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do\n        local value = cap[cvar]\n",
+                                      "    for cvar in pairs(cap) do\n        local value = type(cvar) == \"string\" and cap[cvar]\n" } } },
+    { "HideGameUI does not hide names", { { "    if ok then I.SyncNames() else I.MaybeRelease() end", "    if not ok then I.MaybeRelease() end" } } },
+    { "Enter does not hide names", { { "    I.SyncNames()\n    if cfg.castAware", "    if cfg.castAware" } } },
+    { "the names capture not in the db", { { "    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end\n", "" } } },
+    { "the names capture in the camera capture", { { "lib.NAMES_DB_KEY = \"LibShowcaseNames\"", "lib.NAMES_DB_KEY = \"LibShowcaseCapture\"" } } },
 }
 
 local source = read("LibShowcase.lua")
