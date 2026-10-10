@@ -60,7 +60,7 @@ local function shared(lib)
         lib = lib, impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
         cam = lib.state.cam, lifts = lib.state.lifts, prompts = lib.state.prompts,
         CENTRING = lib.CENTRING_CVARS, FACTORS = lib.SHOULDER_FACTORS, MOUNTED = lib.MOUNTED_SHOULDER_FACTORS,
-        RACE_IDS = lib.RACE_IDS, mt = lib.instanceMT, suppress = lib.SuppressExperimentalCVarPopup,
+        RACE_IDS = lib.RACE_IDS, WORLD_NAMES = lib.WORLD_NAME_CVARS, mt = lib.instanceMT, suppress = lib.SuppressExperimentalCVarPopup,
         shoulder = lib.ShoulderOffsetFor, animFrame = lib.animFrame, eventFrame = lib.eventFrame,
         hook = SetUIVisibility, dialogHook = StaticPopup_Show, specialHook = StaticPopupSpecial_Show,
     }

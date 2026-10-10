@@ -32,7 +32,9 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 
 Library functions (dot): `lib.SuppressExperimentalCVarPopup()` (returns a count),
 `lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?)`. Public tables, filled in place:
-`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`.
+`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
+`lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`) and
+`lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4).
 
 ### Options
 
@@ -62,6 +64,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `dynamicPitch` | false | `test_cameraDynamicPitch` = 1 (see Open measurements) |
 | `pitchLimit` | nil | `ConsoleExec("pitchlimit N")`, `pitchlimit 88` on restore |
 | `viewBlendStyle` | nil | `cameraViewBlendStyle` |
+| `hideWorldNames` | false | MINOR 4: world name text off while the showcase is up (Guarantees, World names) |
 
 ## One owner: the lease
 
@@ -167,6 +170,46 @@ owner.
   `lib.impl.UnsuppressPopup` stays as a no-op: an r2 copy's pending `C_Timer` callback calls it.
   AltStable's frame walk (`GetFramesRegisteredForEvent`, varargs) is only the fallback when
   `GameEvent` is absent.
+- **World names (`hideWorldNames`, MINOR 4, opt-in; off, nothing changes).** Player, pet/minion and
+  NPC names drawn in the world stay up with the game UI hidden; an opted-in owner's showcase sets
+  the "show name" CVars of `lib.WORLD_NAME_CVARS` to `"0"`. Nameplates are a separate feature and
+  untouched. The list is FrameXML 70338's Names settings (`UnitNameOwn`,
+  `UnitNameFriendlyPlayerName`, `UnitNameFriendlyMinionName`, `UnitNameEnemyPlayerName`,
+  `UnitNameEnemyMinionName`, `UnitNameNPC`, `UnitNameFriendlySpecialNPCName`, `UnitNameHostleNPC`
+  (the client's spelling), `UnitNameInteractiveNPC`, `UnitNameNonCombatCreatureName`) and
+  Blizzard_Commentator's pet/guardian/totem flags: **candidates, not measured** (Open
+  measurements).
+  - **When:** while the owner's presentation runs (`Enter` to the end of the exit animation; with
+    `hideUI = false` too), and camera OFF while its `HideGameUI` has the UI hidden. The option is
+    read with the others at `Enter` (the presentation keeps that value), and live for `HideGameUI`.
+  - **Ends with the showcase:** whatever ends it puts the names back: `Exit` (at the end of the
+    animation, with the other CVars), Escape/Alt+Z, `ForceRestore`, `Release`, `RestoreGameUI`,
+    combat (`PLAYER_REGEN_DISABLED`, still unlocked), `PLAYER_LOGOUT` (so `/reload` and quitting),
+    `PLAYER_ENTERING_WORLD`. All of them pass through the lease's release check, which restores
+    the names once nothing wants them hidden.
+  - **A dialog revealing the UI** keeps a presentation's names off (the presentation goes on);
+    camera OFF the hidden UI was the showcase, so its names come back with it, and a later
+    `HideGameUI` takes a fresh capture.
+  - **The capture:** only CVars the client has (`GetCVar` not nil: none is created) and that are not
+    already `"0"` (one already off is never written, so it keeps its value). Read whole before the
+    first write, written to `db.LibShowcaseNames` first, and taken **once**: a second `Enter`, or
+    `HideGameUI` then `Enter`, keeps the first; re-entering during the exit animation restores, then
+    captures afresh, so the zeroes are never taken for the player's.
+  - **The player's changes meanwhile:** a name turned on stays on (one that was off is not
+    captured; one that was on goes back on). One turned off reads as the library's `"0"` and goes
+    back to its value from before. The CVars are booleans, so that is every case.
+  - **Never in a lockdown:** `Enter` and `HideGameUI` refuse in combat, and combat restores at
+    `PLAYER_REGEN_DISABLED` (unlocked), so the CVars are never written in combat. (Whether they are
+    protected there is not measured; `/lsprobe names` logs their `isSecure` flag.)
+  - **The lease:** written only by the owner, inside its lease; a refused `Enter`/`HideGameUI`
+    writes nothing, and another instance's stale names capture is not healed under someone else's
+    lease.
+  - **Crash self-heal:** the names capture is its own key, `db.LibShowcaseNames`, so
+    `db.LibShowcaseCapture` keeps r3's shape (an r3 copy healing it finds what it knows; an r3 copy
+    leaves the names key alone). It heals with the camera one (`PLAYER_LOGIN`, `New` after login,
+    the instance's next `Enter`) and before a `HideGameUI` capture; not while this instance has the
+    names hidden (that capture is live). A malformed entry is skipped. The same limit as the camera
+    capture: `PLAYER_LOGOUT` restores and clears it before SavedVariables are written.
 - **The OnUpdate runner hangs from WorldFrame**: `SetUIVisibility(false)` hides UIParent's
   children, and a hidden frame's OnUpdate stops.
 
@@ -178,7 +221,8 @@ time, as do the `SetUIVisibility` and StaticPopup hooks, the scripts and timer c
 identity; frames, events and the hook are created once; a newer copy fills only missing option
 keys. `lib.ready = MINOR` is the last line. `tests/test_upgrade.lua` proves it with a synthetic
 newer copy loaded mid-presentation, and with the released r3, whole (`tests/fixtures/LibShowcase-r3/`: its XML, LibShowcase.lua and LibStub, byte for
-byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (87 mutations, all red).
+byte the tag's) under the current copy, in both orders; `tests/mutate.lua` breaks each rule (107 mutations, all red).
+An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_names.lua`).
 
 ## Deliberate differences from AltStable's block
 
@@ -208,6 +252,7 @@ byte the tag's) under the current copy, in both orders; `tests/mutate.lua` break
 | Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
+| Which `WORLD_NAME_CVARS` exist on Forever, and which are needed: do player, pet/minion and NPC names, guild/title lines, regional surnames and pet-owner text disappear in a crowded place, and is every value back after the close, a `/reload` and a restart? (#14) | `/lsprobe names`, `/lsprobe names ui`, `/lsprobe names list` |
 | The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/lsprobe prompts` with a ready check (or a loot roll) waiting, then after answering |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written

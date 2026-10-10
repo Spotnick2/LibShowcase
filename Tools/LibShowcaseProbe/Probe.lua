@@ -41,6 +41,11 @@
 --                          boxes, and the chat globals: before and after one
 --   /lsprobe prompts       every return of the prompt getters the library
 --                          asks before hiding (a ready check waiting, then not)
+--   /lsprobe names [ui]    hideWorldNames: logs each name CVar (value, flags),
+--                          opens the presentation (ui: camera OFF, the UI
+--                          hidden) with names hidden; again to close, and the
+--                          values are logged after the restore. `names list`
+--                          only logs them (after a /reload, a restart)
 --   /lsprobe next          prints the /console line to type (a changing value)
 --   /lsprobe restore       puts every CVar this probe touched back
 --   /lsprobe log | clear
@@ -288,6 +293,63 @@ local function Prompts()
     end
 end
 
+-- 9. hideWorldNames (#14): which name CVars the client has, their values and
+-- flags, then a presentation with them hidden, in a crowded place. Look at
+-- player, pet/minion and NPC names, guild/title lines, regional surnames and
+-- pet-owner text: which stay up? Run it again to close; the values are logged
+-- once more after the restore and must match the first list.
+-- `/lsprobe names ui`: the same with the camera OFF (Acquire + HideGameUI).
+local NAME_EXTRAS = { "UnitSurnameOwn", "UnitNamePlayerGuild", "UnitNamePlayerPVPTitle",
+                      "UnitNameGuildTitle", "UnitNameForceHideMinus" }
+local namesOpen
+local function LogNames(tag)
+    local seen = {}
+    local function one(cvar)
+        if seen[cvar] then return end
+        seen[cvar] = true
+        local v = GetCVar(cvar)
+        if v == nil then Log(("  [%s] %s: ABSENT"):format(tag, cvar)); return end
+        local flags = ""
+        if C_CVar and C_CVar.GetCVarInfo then
+            local ok, _, def, _, _, locked, secure, readOnly = pcall(C_CVar.GetCVarInfo, cvar)
+            if ok then
+                flags = (" default=%s locked=%s secure=%s readOnly=%s"):format(tostring(def), tostring(locked),
+                    tostring(secure), tostring(readOnly))
+            end
+        end
+        Log(("  [%s] %s = %s%s"):format(tag, cvar, tostring(v), flags))
+    end
+    for _, cvar in ipairs(LibStub("LibShowcase-1.0").WORLD_NAME_CVARS) do one(cvar) end
+    for _, cvar in ipairs(NAME_EXTRAS) do one(cvar) end
+end
+
+local function Names(arg)
+    if namesOpen then
+        if namesOpen == "ui" then SC:Release() elseif window then window:Hide() end
+        namesOpen = nil
+        C_Timer.After(1.5, function()
+            SC.opts.hideWorldNames = false
+            LogNames("after")
+            Log("  every value must match [before]. Then /reload and /lsprobe names list: still the same?")
+        end)
+        return
+    end
+    if arg == "list" then LogNames("now"); return end
+    Log("== names " .. (arg == "ui" and "ui (camera OFF)" or "(presentation)") .. ": build " .. select(2, GetBuildInfo()))
+    LogNames("before")
+    SC.opts.hideWorldNames = true
+    if arg == "ui" then
+        SC:Acquire()
+        Log(("  HideGameUI -> %s"):format(tostring(SC:HideGameUI())))
+        namesOpen = "ui"
+    else
+        if not (window and window:IsShown()) then Show() end
+        namesOpen = "show"
+    end
+    LogNames("hidden")
+    Log("  Which names, guild/title lines, surnames or pet-owner text are still drawn? Note them, then /lsprobe names")
+end
+
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 local function Rereg(how)
     Log("== rereg " .. tostring(how) .. ": unregister, then register the handler this way")
@@ -357,6 +419,7 @@ SlashCmdList.LSPROBE = function(msg)
         end
     elseif cmd == "taint" then Taint()
     elseif cmd == "prompts" then Prompts()
+    elseif cmd == "names" then Names(arg)
     elseif cmd == "testcvar" then TestCVar()
     elseif cmd == "rereg" then Rereg(arg)
     elseif cmd == "dialogs" then DialogTaint("now")
@@ -366,6 +429,6 @@ SlashCmdList.LSPROBE = function(msg)
     elseif cmd == "log" then for _, l in ipairs(db and db.log or {}) do print(l) end
     elseif cmd == "clear" then if db then db.log = {} end; Log("log cleared")
     else
-        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
+        print("/lsprobe pitch [off] | nudge [0|1] | combat | invite | show [N] | taint | prompts | names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus | next | restore | log | clear")
     end
 end

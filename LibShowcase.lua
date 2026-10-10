@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 3
+local MAJOR, MINOR = "LibShowcase-1.0", 4
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -119,8 +119,36 @@ lib.RACE_IDS = fill(lib.RACE_IDS or {}, {
     Gnome = 7, Troll = 8, BloodElf = 10, Draenei = 11,
 })
 
+-- The world name text (players, pets and minions, NPCs) hideWorldNames turns
+-- off: the "show name" CVars FrameXML 70338's Names settings
+-- (Blizzard_SettingsDefinitions_Frame/Nameplates.lua; "Hostle" is the
+-- client's spelling) and Blizzard_Commentator's pet/guardian/totem flags.
+-- Not nameplates. Only those the client has are touched. CANDIDATES: which
+-- of them the client needs is measured with /lsprobe names.
+lib.WORLD_NAME_CVARS = fill(lib.WORLD_NAME_CVARS or {}, {
+    "UnitNameOwn",
+    "UnitNameFriendlyPlayerName",
+    "UnitNameFriendlyMinionName",
+    "UnitNameFriendlyPetName",
+    "UnitNameFriendlyGuardianName",
+    "UnitNameFriendlyTotemName",
+    "UnitNameEnemyPlayerName",
+    "UnitNameEnemyMinionName",
+    "UnitNameEnemyPetName",
+    "UnitNameEnemyGuardianName",
+    "UnitNameEnemyTotemName",
+    "UnitNameNPC",
+    "UnitNameFriendlySpecialNPCName",
+    "UnitNameHostleNPC",
+    "UnitNameInteractiveNPC",
+    "UnitNameNonCombatCreatureName",
+})
+
 -- The key a consumer's db table carries the capture under while presenting.
 lib.DB_KEY = "LibShowcaseCapture"
+-- And the world-name capture (hideWorldNames), apart: an older copy healing
+-- LibShowcaseCapture must find the shape it knows.
+lib.NAMES_DB_KEY = "LibShowcaseNames"
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 local CAST_RESET_YAW_SPEED = 0.78       -- PortalRoulette CameraMode.lua
@@ -154,6 +182,7 @@ lib.defaults.opts = fill(lib.defaults.opts or {}, {
     anchorStrata = "DIALOG",
     castAware = false,
     dynamicPitch = false,
+    hideWorldNames = false,
     salute = false,
 })
 
@@ -167,6 +196,7 @@ lib.defaults.types = fill(lib.defaults.types or {}, {
     anchorStrata = "string", castAware = "boolean", dynamicPitch = "boolean",
     pitchLimit = "number", viewBlendStyle = "number", salute = "boolean",
     onForcedExit = "function", onGameUIShown = "function", debug = "boolean|function",
+    hideWorldNames = "boolean",
 })
 
 local function Clamp(v, minV, maxV, fallback)
@@ -207,6 +237,7 @@ function I.Config(inst)
         pitchLimit    = o.pitchLimit ~= nil and math.floor(Clamp(o.pitchLimit, 1, 88, 88)) or nil,
         viewBlendStyle = o.viewBlendStyle ~= nil and math.floor(Clamp(o.viewBlendStyle, 0, 2, 1)) or nil,
         salute        = o.salute == true,
+        hideWorldNames = o.hideWorldNames == true,
     }
 end
 
@@ -284,7 +315,10 @@ function I.Idle()
 end
 
 -- Give the lease back once nothing is left to restore and nobody Acquired it.
+-- Every path that ends a presentation or brings the UI back comes through
+-- here, so the world names go back here too.
 function I.MaybeRelease()
+    I.SyncNames()
     if st.owner ~= nil and not st.explicit and I.Idle() then
         st.owner = nil
     end
@@ -458,7 +492,7 @@ end
 function I.HideGameUI(inst, anchor)
     if not I.Claim(inst) then return false, "busy" end
     local ok, why = I.HideUI(inst, anchor)
-    if not ok then I.MaybeRelease() end
+    if ok then I.SyncNames() else I.MaybeRelease() end
     return ok, why
 end
 
@@ -481,6 +515,95 @@ end
 
 function I.IsGameUIHidden(inst)
     return st.uiHidden == true
+end
+
+--------------------------------------------------------------------------------
+-- World names (hideWorldNames)
+--------------------------------------------------------------------------------
+-- Player, pet/minion and NPC names drawn in the world stay up with the game UI
+-- hidden. With hideWorldNames, the owner's showcase turns them off: while its
+-- presentation runs (exit animation included; a dialog bringing the UI back
+-- does not end it), and, camera OFF, while HideGameUI has the UI hidden.
+-- Whatever ends that (Exit, Escape/Alt+Z, combat, logout, loading, a restore,
+-- a dialog revealing a HideGameUI-only UI) puts them back through
+-- MaybeRelease. Combat restores at PLAYER_REGEN_DISABLED, still unlocked, and
+-- Enter and HideGameUI refuse in combat: the CVars are never written in a
+-- lockdown.
+--
+-- st.names = { inst, capture }: capture is cvar -> the player's value, only
+-- for the CVars that exist and are not already "0" (only those are written;
+-- one already off is never touched). Read whole BEFORE the first write, and
+-- taken once: a second Enter, or HideGameUI then Enter, keeps the first.
+-- The player's changes meanwhile: a name turned on stays on (one that was
+-- off is not captured, so not written back; one that was on goes back on).
+-- One turned off reads as the library's "0" and goes back to the player's
+-- value from before: the CVars are booleans, and that is the only case.
+
+-- The instance whose showcase wants the names hidden now, or nil.
+function I.NamesWanted()
+    local inst, cam = st.owner, st.cam
+    if not inst then return nil end
+    if cam.active and cam.inst == inst then
+        return cam.cfg and cam.cfg.hideWorldNames and inst or nil
+    end
+    return st.uiHidden and inst.opts.hideWorldNames == true and inst or nil
+end
+
+-- Put a capture back (a restore, or a heal): sorted, for a stable order. A
+-- heal's capture may name a CVar this client lacks: writing it would create it.
+function I.RestoreNames(cap)
+    if type(GetCVar) ~= "function" or type(SetCVar) ~= "function" then return end
+    local cvars = {}
+    for cvar, value in pairs(cap) do
+        if type(cvar) == "string" and (type(value) == "string" or type(value) == "number")
+            and GetCVar(cvar) ~= nil then
+            cvars[#cvars + 1] = cvar
+        end
+    end
+    table.sort(cvars)
+    for _, cvar in ipairs(cvars) do pcall(SetCVar, cvar, cap[cvar]) end
+end
+
+-- Only through SyncNames, which never takes a second capture.
+function I.HideNames(inst)
+    if type(GetCVar) ~= "function" or type(SetCVar) ~= "function" then return end
+    -- A capture an earlier session left (HideGameUI does not heal) goes back
+    -- first, or the zeroes it left would be read as the player's.
+    local db = I.DB(inst)
+    if db and type(db[lib.NAMES_DB_KEY]) == "table" then
+        I.RestoreNames(db[lib.NAMES_DB_KEY])
+        db[lib.NAMES_DB_KEY] = nil
+    end
+    local cap, n = {}, 0
+    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do
+        local v = GetCVar(cvar)
+        if v ~= nil and v ~= "0" then cap[cvar] = v; n = n + 1 end
+    end
+    st.names = { inst = inst, capture = cap }
+    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end
+    for _, cvar in ipairs(lib.WORLD_NAME_CVARS) do
+        if cap[cvar] then pcall(SetCVar, cvar, "0") end
+    end
+    I.Debug(inst, "world names hidden: " .. n .. " CVar(s)")
+end
+
+function I.ShowNames()
+    local names = st.names
+    if not names then return end
+    st.names = nil
+    I.RestoreNames(names.capture)
+    local db = I.DB(names.inst)
+    if db and db[lib.NAMES_DB_KEY] == names.capture then db[lib.NAMES_DB_KEY] = nil end
+    I.Debug(names.inst, "world names restored")
+end
+
+function I.SyncNames()
+    local inst = I.NamesWanted()
+    if inst and not st.names then
+        I.HideNames(inst)
+    elseif not inst and st.names then
+        I.ShowNames()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -941,6 +1064,7 @@ function I.Enter(inst, anchor)
 
     lib.animFrame:Show()
     if cfg.hideUI and anchor then I.HideUI(inst, anchor) end
+    I.SyncNames()
     if cfg.castAware then I.SetCastEvents(true) end
     I.Debug(inst, "enter start")
     return true
@@ -1154,12 +1278,25 @@ function I.Heal(inst)
     -- stays; this instance's next Enter heals it, holding the lease.
     if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end
     local db = I.DB(inst)
-    local cap = db and db[lib.DB_KEY]
-    if type(cap) ~= "table" then return false end
-    I.RestoreCapture(cap)
-    db[lib.DB_KEY] = nil
-    I.Debug(inst, "restored the camera a previous session left changed")
-    return true
+    if not db then return false end
+    local healed = false
+    local cap = db[lib.DB_KEY]
+    if type(cap) == "table" then
+        I.RestoreCapture(cap)
+        db[lib.DB_KEY] = nil
+        I.Debug(inst, "restored the camera a previous session left changed")
+        healed = true
+    end
+    -- Not while this instance has the names hidden (HideGameUI, then Enter):
+    -- the capture in the db is then the live one.
+    local names = db[lib.NAMES_DB_KEY]
+    if type(names) == "table" and not st.names then
+        I.RestoreNames(names)
+        db[lib.NAMES_DB_KEY] = nil
+        I.Debug(inst, "restored the world names a previous session left hidden")
+        healed = true
+    end
+    return healed
 end
 
 function I.OnEvent(event, ...)
