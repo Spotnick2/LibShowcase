@@ -132,7 +132,7 @@ pwsh tests\run.ps1                                               # luac -p + eve
 - `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
 - `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
   "A CVar that does nothing may be obeyed and then overruled").
-- `C:\Projects\WoW\References\forever-api-1.60.1.70205.md`: the API dump.
+- `C:\Projects\WoW\References\forever-api-1.60.1.70338.md`: the API dump (MEASURED notes name the build they were taken on).
 - `C:\Projects\WoW\AltStable` (`docs/forever-api-notes.md`, CVars section) and
   `C:\Projects\WoW\PortalRoulette\docs\FOREVER-PROBE.md`: where the camera facts were measured.
 

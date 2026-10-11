@@ -3,7 +3,7 @@
 --
 -- What it models, on purpose:
 -- - STRICT globals: reading any global it does not define is an error. Each
---   stub is a name confirmed in the API dump (forever-api-1.60.1.70205.md);
+--   stub is a name confirmed in the API dump (forever-api-1.60.1.70338.md);
 --   defining something Forever lacks is how a missing API survives into a
 --   build. UnitBuff and NUM_CHAT_WINDOWS are NOT in the dump, so they read as
 --   nil (AltStable's frozen block reads them).
@@ -25,7 +25,7 @@
 --   test_methods.lua, and logged per widget with its arguments (w._log).
 
 WoW = {}
-WoW.DUMP = os.getenv("LIBSHOWCASE_API_DUMP") or "C:/Projects/WoW/References/forever-api-1.60.1.70205.md"
+WoW.DUMP = os.getenv("LIBSHOWCASE_API_DUMP") or "C:/Projects/WoW/References/forever-api-1.60.1.70338.md"
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 
