@@ -25,7 +25,7 @@
 --   test_methods.lua, and logged per widget with its arguments (w._log).
 
 WoW = {}
-WoW.DUMP = os.getenv("LIBSHOWCASE_API_DUMP") or "C:/Projects/References/forever-api-1.60.1.70205.md"
+WoW.DUMP = os.getenv("LIBSHOWCASE_API_DUMP") or "C:/Projects/WoW/References/forever-api-1.60.1.70205.md"
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 

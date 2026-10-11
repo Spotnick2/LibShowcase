@@ -70,7 +70,7 @@ showed the popup `TAINTED by` the addon (`issecurevariable(dialog, "which")`).
 
 ## Upgrade rules (several addons ship copies; the newest one wins, and it may not be yours)
 
-These follow `C:\Projects\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
+These follow `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
 
 - **Dispatch at call time.** Instance methods live in `lib.methods` (the instances' shared
   `__index`, a plain table) as `function(self, ...) return lib.impl[name](self, ...) end`. The
@@ -90,7 +90,7 @@ These follow `C:\Projects\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fac
 As LibGlass: raise `MINOR` for every behaviour change in the same PR, tag the merge commit
 `r<MINOR>`, never move a tag. Consumers pin `tag: rN` and bump only in a release they make anyway,
 and repeat this repo's non-dot ignores under `Libs/LibShowcase-1.0/`. Before tagging: **every**
-consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\LibShowcase'`, then
+consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\WoW\LibShowcase'`, then
 `pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
 `pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
 whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
@@ -129,12 +129,12 @@ pwsh tests\run.ps1                                               # luac -p + eve
 
 ## References
 
-- `C:\Projects\References\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
-- `C:\Projects\References\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
+- `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
+- `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
   "A CVar that does nothing may be obeyed and then overruled").
-- `C:\Projects\References\forever-api-1.60.1.70205.md`: the API dump.
-- `C:\Projects\AltStable` (`docs/forever-api-notes.md`, CVars section) and
-  `C:\Projects\PortalRoulette\docs\FOREVER-PROBE.md`: where the camera facts were measured.
+- `C:\Projects\WoW\References\forever-api-1.60.1.70205.md`: the API dump.
+- `C:\Projects\WoW\AltStable` (`docs/forever-api-notes.md`, CVars section) and
+  `C:\Projects\WoW\PortalRoulette\docs\FOREVER-PROBE.md`: where the camera facts were measured.
 
 ## Conventions
 
