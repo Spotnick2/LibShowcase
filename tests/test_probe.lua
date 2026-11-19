@@ -119,10 +119,14 @@ taintedBy = nil
 fp("ls dialogs")
 check(logHas("[now] no shown dialog found"), "  and says when none is shown")
 
+-- UnitAffectingCombat (in the 70959 dump): what #21 asks, true once combat starts.
+rawset(_G, "UnitAffectingCombat", function(unit) return unit == "player" and WoW.affecting == true end)
+WoW.affecting = true
 fp("ls combat")
 check(logHas("== combat: armed"), "combat: armed")
 WoW.enterCombat()
-check(logHas("InCombatLockdown() in the handler = false"), "  REGEN_DISABLED runs unlocked")
+check(logHas("in the handler InCombatLockdown() = false, UnitAffectingCombat(\"player\") = true"),
+      "  REGEN_DISABLED runs unlocked; the client's combat flag is logged there (#21)")
 WoW.advance(0.05)
 check(logHas("SetUIVisibility(false) in combat: pcall true"), "  once locked, the UI is hidden")
 WoW.advance(0.5)
@@ -227,6 +231,7 @@ WoW.advance(0.05); WoW.advance(0.5)
 S.Poll()
 eq(rec.results[2].status, "done", "  done once both calls ran")
 check(tostring(rec.results[2].detail):find("done", 1, true), "  with what they did")
+check(tostring(rec.results[2].detail):find("UnitAffectingCombat in the handler true", 1, true), "  and the client's combat flag in the handler (#21)")
 WoW.leaveCombat()
 S.Answer(true)
 eq(rec.status, "done", "the combat procedure finishes")
