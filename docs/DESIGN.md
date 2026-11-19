@@ -301,14 +301,16 @@ console and `LibShowcaseProbeDB.log`; each procedure's record is in `ForeverProb
 (`steps.records["LibShowcaseProbe/<name>"]`). The MEASURED notes above name the commands as they
 were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
-| Question | Procedure |
-|---|---|
-| Hiding the UI with a target selected: does the "target lost" click play? Forever loads the Mainline `TargetFrame`, whose `OnHide` plays `INTERFACE_SOUND_LOST_TARGET_UNIT` (#41) | `/fp steps ls sound` (Alt+Z first, the control) |
+None open.
 
 Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the prompt
 getters and the dungeon-invite role prompt, `SetUIVisibility` in a lockdown (above), and the
 `CameraZoomIn(0)` nudge: `/fp steps ls nudge` saw the shoulder offset apply at once with and
 without it, so the library doesn't need it (and never did it).
+Also closed on 70959 (2026-11-19): the "target lost" click (#41). Forever loads the Mainline
+`TargetFrame`, whose `OnHide` plays `INTERFACE_SOUND_LOST_TARGET_UNIT`, but `/fp steps ls sound`
+(run #467, a hard target, `IsTargetLoose()` false) heard no click when the presentation hid the
+UI, nor on the Alt+Z control, and the target stayed selected. The library does nothing about it.
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
 securely (`issecurevariable`), every blocked action is copied into its log, and `/fp ls focus`
