@@ -953,9 +953,10 @@ local function TempStart()
     local pad = G("C_GamePad") and C_GamePad.IsEnabled
     local okPad, enabled = false, nil
     if type(pad) == "function" then okPad, enabled = pcall(pad) end
-    say(("  SetTempCVar %s, RemoveTempCVar %s, GetCVarInfo %s; C_GamePad.IsEnabled %s")
+    say(("  SetTempCVar %s, RemoveTempCVar %s, GetCVarInfo %s; C_GamePad.IsEnabled %s, GamePadEnable %s")
         :format(tostring(TempApi("SetTempCVar") ~= nil), tostring(TempApi("RemoveTempCVar") ~= nil),
-            tostring(TempApi("GetCVarInfo") ~= nil), okPad and tostring(enabled) or "n/a"))
+            tostring(TempApi("GetCVarInfo") ~= nil), okPad and tostring(enabled) or "n/a",
+            tostring(GetCVar("GamePadEnable"))))
     if not (TempApi("SetTempCVar") and TempApi("RemoveTempCVar")) then
         return false, "no C_CVar.SetTempCVar / RemoveTempCVar on this client"
     end
@@ -998,7 +999,14 @@ end
 Probe:Steps("tempcvar", {
     title = "A library write over the gamepad's temp CVars (#51)",
     { text = "Out of combat, mouse and keyboard (no controller needed). Reading the two centring CVars.", auto = true, run = TempStart },
-    { text = "Base writes stored values the temp won't use (KeepCentered 0, ReduceUnexpected 1).", button = "Base",
+    -- The control (run #474 left the temp values after Remove): no write
+    -- between Temp and Remove.
+    { text = "The control. Base writes stored values the temp won't use (KeepCentered 0, ReduceUnexpected 1).", button = "Base",
+      run = function() return TempDo("base") end },
+    { text = "Temp puts the gamepad's temp values on top.", button = "Temp", run = function() return TempDo("temp") end },
+    { text = "Remove takes them off right away, with no write in between. Do the Base values come back?", button = "Remove",
+      run = function() return TempDo("remove") end },
+    { text = "Now with the library's writes. Base writes the stored values again.", button = "Base",
       run = function() return TempDo("base") end },
     { text = "Temp puts the gamepad's temp values on top (KeepCentered 1, ReduceUnexpected 0), as gamepad mode does.",
       button = "Temp", run = function() return TempDo("temp") end },
