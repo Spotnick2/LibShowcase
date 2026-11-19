@@ -140,7 +140,9 @@ owner.
   player answers (`"ready"` for the one who started it), then nil; `GetReadyCheckTimeLeft()` counts
   down in seconds, then 0; with nothing pending `GetLFGProposal()` returns nothing,
   `GetLFGRoleUpdate()` returns `false, 0, 0, nil, nil, false`, and `GetActiveLootRollIDs()` a table:
-  Retail's shapes. `GetLootRollTimeLeft` and a pending LFG proposal or role check weren't seen. The role poll and the PvP role popup
+  Retail's shapes so far. Not yet seen, and they're what this check reads: a populated
+  `GetActiveLootRollIDs()` with `GetLootRollTimeLeft(id)`, and `GetLFGProposal()` /
+  `GetLFGRoleUpdate()` with a proposal or role check pending (Open measurements). The role poll and the PvP role popup
   have no getter.
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
@@ -291,8 +293,12 @@ console and `LibShowcaseProbeDB.log`; each procedure's record is in `ForeverProb
 (`steps.records["LibShowcaseProbe/<name>"]`). The MEASURED notes above name the commands as they
 were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
-None is open. Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option
-row), the prompt getters' shapes and `SetUIVisibility` in a lockdown (above), and the
+| Question | Procedure |
+|---|---|
+| The prompt getters with a prompt pending, as the live-prompt check reads them: a populated `GetActiveLootRollIDs()` and `GetLootRollTimeLeft(id)` (a loot roll up), `GetLFGProposal()` (a dungeon finder proposal up), `GetLFGRoleUpdate()` (a role check up) | `/fp steps ls prompts` with that prompt up instead of a ready check |
+
+Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the
+ready-check getters and the idle prompt getters, `SetUIVisibility` in a lockdown (above), and the
 `CameraZoomIn(0)` nudge: `/fp steps ls nudge` saw the shoulder offset apply at once with and
 without it, so the library doesn't need it (and never did it).
 

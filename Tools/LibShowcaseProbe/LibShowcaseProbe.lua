@@ -573,9 +573,9 @@ Probe:Steps("combat", {
 
 Probe:Steps("prompts", {
     title = "The prompt getters' shapes",
-    { text = "In a group: start a ready check (or wait for a loot roll) and leave it unanswered, then press Next." },
+    { text = "Get one prompt up and leave it unanswered: a ready check, a loot roll, a dungeon finder proposal or a role check. Say which in the Note box, then press Next." },
     { text = "Read logs every return of the prompt getters while it waits.", button = "Read", run = Prompts },
-    { text = "Answer the ready check (or the roll), then press Next." },
+    { text = "Answer that prompt, then press Next." },
     { text = "Reading them again, with nothing waiting.", auto = true, run = Prompts },
 })
 
