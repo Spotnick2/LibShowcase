@@ -48,6 +48,26 @@ local function allWidgets(extra)
     return t
 end
 -- How many of `widgets` were called since `before` (from logSizes).
+-- The same, but the library's own event frame may register the events the
+-- older copy lacked (a newer copy adds its events once each: lib.events),
+-- and nothing else. Returns the count of other calls and the new events.
+local function touchedBesidesNewEvents(before, widgets, eventFrame, hadEvents)
+    local n, added = 0, {}
+    for i, w in ipairs(widgets) do
+        local log = w._log or {}
+        for j = (before[i] or 0) + 1, #log do
+            local c = log[j]
+            if w == eventFrame and c[1] == "RegisterEvent" and not hadEvents[c[2]] then
+                added[#added + 1] = c[2]
+            else
+                n = n + 1
+            end
+        end
+    end
+    table.sort(added)
+    return n, table.concat(added, ",")
+end
+
 local function touchedSince(before, widgets)
     local after, n = logSizes(widgets), 0
     for i, size in ipairs(before) do if after[i] ~= size then n = n + 1 end end
@@ -112,7 +132,7 @@ do
     local held = {
         lib = lib, impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
         cam = lib.state.cam, lifts = lib.state.lifts, CENTRING = lib.CENTRING_CVARS,
-        FACTORS = lib.SHOULDER_FACTORS, human = lib.SHOULDER_FACTORS[1], RACE_IDS = lib.RACE_IDS,
+        FACTORS = lib.SHOULDER_FACTORS, human = lib.SHOULDER_FACTORS[1], RACE_IDS = lib.RACE_IDS, FEMALE = lib.FEMALE_SHOULDER_FACTORS,
         animFrame = lib.animFrame, eventFrame = lib.eventFrame, enter = A.Enter, opts = A.opts,
         hook = SetUIVisibility, suppress = lib.SuppressExperimentalCVarPopup, shoulder = lib.ShoulderOffsetFor,
         mt = lib.instanceMT, dialogHook = StaticPopup_Show, specialHook = StaticPopupSpecial_Show,
@@ -132,7 +152,8 @@ do
     eq(lib.state.cam, held.cam, "the camera state too")
     eq(lib.state.lifts, held.lifts, "and the lift records")
     check(lib.CENTRING_CVARS == held.CENTRING and lib.SHOULDER_FACTORS == held.FACTORS
-          and lib.SHOULDER_FACTORS[1] == held.human and lib.RACE_IDS == held.RACE_IDS,
+          and lib.SHOULDER_FACTORS[1] == held.human and lib.RACE_IDS == held.RACE_IDS
+          and held.FEMALE ~= nil and lib.FEMALE_SHOULDER_FACTORS == held.FEMALE,
           "public tables filled in place")
     eq(lib.instanceMT, held.mt, "the instance metatable too")
     eq(lib.SuppressExperimentalCVarPopup, held.suppress, "lib.SuppressExperimentalCVarPopup is the same function")
@@ -186,9 +207,9 @@ do
     SetUIVisibility(false)
     eq(mark("OnSetUIVisibility"), h0 + 1, "the SetUIVisibility hook runs the newer code, once (and returns early)")
     SetUIVisibility(true)
-    -- Escape: the hook once, plus once more for the library's own re-show
-    -- inside it (one hook run per SetUIVisibility call, never two).
-    eq(mark("OnSetUIVisibility"), h0 + 3, "  and on Escape")
+    -- Escape: the hook once. The UI is already back, so the library makes
+    -- no re-show call of its own (#42; r4 made one, a second hook run).
+    eq(mark("OnSetUIVisibility"), h0 + 2, "  and on Escape")
     eq(mark("Exit"), n0 + 1, "  which exits through the newer copy")
     ticks(0.1, 10)
     check(not A:IsOwner(), "the presentation finishes under the newer copy")
@@ -306,6 +327,8 @@ do
     local widgets = allWidgets({ win })
     local before, calls, frames = logSizes(widgets), #WoW.calls, #WoW.frames
 
+    local hadEvents = {}
+    for ev in pairs(lib.events or {}) do hadEvents[ev] = true end
     loadCopy(NEWER_THAN_R, "AltStable")
 
     eq(activeMinor(), NEWER_MINOR, "the newer copy is active over " .. rN)
@@ -314,7 +337,12 @@ do
     eq(A.opts, opts, rN .. "'s instance keeps its opts table")
     check(lib.impl.Enter ~= enter, "lib.impl holds the newer code")
     eq(#WoW.frames, frames, "no frame created")
-    eq(touchedSince(before, widgets), 0, "the upgrade made no call on any widget")
+    local other, added = touchedBesidesNewEvents(before, widgets, lib.eventFrame, hadEvents)
+    eq(other, 0, "the upgrade made no call on any widget, but registering its new events")
+    local want = {}
+    for ev in pairs(lib.events) do if not hadEvents[ev] then want[#want + 1] = ev end end
+    table.sort(want)
+    eq(added, table.concat(want, ","), "  each event " .. rN .. " lacked registered once, on the library's own frame")
     eq(#WoW.calls, calls, "and no camera, CVar or UI call")
     check(A:IsActive() and not UIParent:IsShown() and win:GetParent() == nil, rN .. "'s presentation runs on untouched")
 

@@ -51,9 +51,9 @@ function, option, default, public table or table key. A breaking change is `LibS
   `LiftPopup(dialog)` ("reveal for a dialog": brings the UI back, returns the dialog untouched),
   `DropPopup(dialog)` (a no-op, kept for API stability).
 - Library functions, **dot-called**: `lib.SuppressExperimentalCVarPopup()`,
-  `lib.ShoulderOffsetFor(race, zoom, mounted?)`.
+  `lib.ShoulderOffsetFor(race, zoom, mounted?, sex?)`.
 - Public tables, filled in place: `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`,
-  `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
+  `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
 - The crash-heal keys in a consumer's `db` table: `LibShowcaseCapture` (the camera; keeps r3's
   shape) and `LibShowcaseNames` (`hideWorldNames`).
 - **One owner.** The camera and the game UI are global, so `lib.state` holds one lease. Every
@@ -120,8 +120,10 @@ copies: never edit them here. A kit need is an issue on the kit, worked around i
 repo has no CI.
 
 - `tests\wow_stubs.lua`: this library's part of the mock, every stubbed global confirmed in the
-  API dump: camera, CVars, `SetUIVisibility`, the StaticPopup pool, `WoW.enterCombat` /
-  `leaveCombat`, `SetParent` refused on a protected frame in combat; every global camera call
+  API dump: camera, CVars, `SetUIVisibility` (blocked from addon code in combat, MEASURED 70959;
+  `WoW.playerSetUIVisibility` is the player's own Alt+Z / Escape), the StaticPopup pool, `WoW.enterCombat` /
+  `leaveCombat` (`UnitAffectingCombat("player")` already true inside `PLAYER_REGEN_DISABLED`, the
+  lockdown after it, MEASURED 70959), `SetParent` refused on a protected frame in combat; every global camera call
   logged in order (`WoW.calls`). Strict globals, widgets, events (checked against the build),
   timers and combat lockdown (`WoW.combat`) are the kit's.
 - `tests\harness.lua` loads the library **through the XML's order**; `ticks(dt, n)` runs `n`

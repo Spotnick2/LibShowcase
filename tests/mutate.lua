@@ -66,7 +66,7 @@ local M = {
     { "Release does not restore", { { '    st.explicit = false\n    I.Restore(inst, "release")', '    st.explicit = false\n    st.owner = nil' } } },
     -- Combat
     { "Enter allowed in combat", { { '    if InCombat() then return false, "combat" end\n    if not I.IsSupported()', '    if not I.IsSupported()' } } },
-    { "protected frames dropped in combat", { { "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred = true",
+    { "protected frames dropped in combat", { { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred = true",
                                                 "    if false then\n        rec.deferred = true" } } },
     { "a protected frame lifted in combat", { { "    if InCombat() and IsProtectedFrame(frame) then\n        I.MaybeRelease()",
                                                 "    if false then\n        I.MaybeRelease()" } } },
@@ -74,8 +74,8 @@ local M = {
     { "combat start does not restore", { { 'if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_LOGOUT"', 'if event == "PLAYER_LOGOUT"' } } },
     { "the owner is not told", { { "        I.Notify(inst, event == \"PLAYER_REGEN_DISABLED\" and \"combat\"", "        I.Notify(nil, event == \"PLAYER_REGEN_DISABLED\" and \"combat\"" } } },
     -- The UI and lifts
-    { "the UI flag cleared after the re-show", { { "    st.uiHidden = false\n    if type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end",
-                                                   "    if type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end\n    st.uiHidden = false" } } },
+    { "the UI flag cleared after the re-show", { { "    st.uiHidden, st.showOwed = false, nil\n    if not shown and type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end",
+                                                   "    if not shown and type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end\n    st.uiHidden, st.showOwed = false, nil" } } },
     { "no exit when the consumer ignores Escape", { { '    if st.cam.active and st.cam.mode ~= "exit" then I.Exit(inst, "ui-shown") end\n', "" } } },
     { "GameTooltip not lifted", { { '    if GameTooltip then I.Lift(inst, GameTooltip, "TOOLTIP") end\n', "" } } },
     { "a second lift saves the lifted state", { { "    if I.FindLift(frame) then return true end\n", "" } } },
@@ -87,9 +87,9 @@ local M = {
     { "no StaticPopup_Show hook", { { '        hooksecurefunc("StaticPopup_Show", function() lib.impl.OnStaticPopupShow() end)\n', "" } } },
     { "no StaticPopupSpecial_Show hook", { { '        hooksecurefunc("StaticPopupSpecial_Show", function() lib.impl.OnStaticPopupSpecialShow() end)\n', "" } } },
     { "a refused dialog reveals", { { "    if st.uiHidden and I.AnyDialogShown() then", "    if st.uiHidden then" } } },
-    { "the reveal acts with the UI up", { { "    if not inst or not st.uiHidden then return false end\n    I.ShowUI()", "    if not inst then return false end\n    I.ShowUI()" } } },
-    { "the reveal read as Escape", { { "    I.ShowUI()\n    I.Debug(inst, \"game UI shown", "    pcall(SetUIVisibility, true)\n    I.Debug(inst, \"game UI shown" } } },
-    { "the reveal ends the presentation", { { "    I.ShowUI()\n    I.Debug(inst, \"game UI shown", "    I.Restore(inst, \"dialog\")\n    I.Debug(inst, \"game UI shown" } } },
+    { "the reveal acts with the UI up", { { "    if not inst or not st.uiHidden then return false end\n    I.ShowUI()\n    if st.uiHidden then", "    if not inst then return false end\n    I.ShowUI()\n    if st.uiHidden then" } } },
+    { "the reveal read as Escape", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    pcall(SetUIVisibility, true)\n    if false then\n" } } },
+    { "the reveal ends the presentation", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.Restore(inst, \"dialog\")\n    if false then\n" } } },
     { "onGameUIShown not called", { { "    I.NotifyShown(inst, reason)\n", "" } } },
     { "LiftPopup touches the dialog", { { '    if I.IsOwner(inst) then I.RevealForDialog("dialog") end\n',
                                           '    if I.IsOwner(inst) then I.RevealForDialog("dialog") end\n    if dialog then pcall(dialog.SetFrameStrata, dialog, "FULLSCREEN_DIALOG") end\n' } } },
@@ -100,8 +100,8 @@ local M = {
     { "no suppression before the offset write", { { "    I.SuppressExperimentalCVarPopup()\n    pcall(SetCVar, \"test_cameraOverShoulder\", desired)",
                                                     "    pcall(SetCVar, \"test_cameraOverShoulder\", desired)" } } },
     { "re-registered after a restore (taints the dialog pool)", {
-        { "    I.DropAll()\n    I.MaybeRelease()\n    if wasActive",
-          "    I.DropAll()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, GameEvent.HandleExperimentalCVarConfirmationNeeded)\n    I.MaybeRelease()\n    if wasActive" } } },
+        { "    if not st.uiHidden then I.DropAll() end\n    I.MaybeRelease()\n    if wasActive",
+          "    if not st.uiHidden then I.DropAll() end\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, GameEvent.HandleExperimentalCVarConfirmationNeeded)\n    I.MaybeRelease()\n    if wasActive" } } },
     { "an older copy's timer re-registers", {
         { "function I.UnsuppressPopup()\nend\n",
           "function I.UnsuppressPopup()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...) return GameEvent.HandleExperimentalCVarConfirmationNeeded(...) end)\nend\n" } } },
@@ -113,7 +113,7 @@ local M = {
     { "the presentation starts from view 3", { { "    pcall(SetView, 2)\n\n", "    pcall(SetView, 3)\n\n" } } },
     { "Exit does not snap the view back", { { "    if cam.capture and cam.capture.savedViewSlot then pcall(SetView, cam.capture.savedViewSlot) end\n", "" } } },
     { "re-entry during exit resumes", { { '        I.Restore(inst, "re-enter during exit")\n', '        cam.mode = "enter"\n        do return true end\n' } } },
-    { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom)" } } },
+    { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex)" } } },
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
     { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false\n", "" } } },
@@ -187,6 +187,47 @@ local M = {
     { "Enter does not hide names", { { "    I.SyncNames()\n    if cfg.castAware", "    if cfg.castAware" } } },
     { "the names capture not in the db", { { "    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end\n", "" } } },
     { "the names capture in the camera capture", { { "lib.NAMES_DB_KEY = \"LibShowcaseNames\"", "lib.NAMES_DB_KEY = \"LibShowcaseCapture\"" } } },
+    -- #42: SetUIVisibility is blocked in a lockdown
+    { "ShowUI ignores the lockdown", { { "    if not shown and Locked() then\n        st.showOwed = true\n        return false\n    end\n", "" } } },
+    { "the lifts dropped while the show is owed", { { "    if not st.uiHidden then I.DropAll() end", "    I.DropAll()" } } },
+    { "the owed reveal never told", { { "            I.NotifyShown(owner, reason)\n", "" } } },
+    { "a blocked call read as Escape", { { "    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end\n", "" } } },
+    { "the player's Escape shown again by the library", { { "    if st.uiHidden then I.ShowUI(true) end", "    if st.uiHidden then I.ShowUI() end" } } },
+    -- #21: combat has started once the client's combat flag is up
+    { "the client's combat flag ignored", {
+        { '    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true\n', "    return false\n" } } },
+    { "InCombat ignores the lockdown", {
+        { "    if Locked() then return true end\n    return type(UnitAffectingCombat)", "    return type(UnitAffectingCombat)" } } },
+    { "a drop deferred on the combat flag", {
+        { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred", "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred" } } },
+    -- #40: the pull countdown and the start timers bring the UI back
+    { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
+    { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
+    { "a cancelled countdown stays open", { { '    CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,\n', "" } } },
+    { "a stopped timer stays open", { { '    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(Plain(timerType)) end,\n', "" } } },
+    { "a countdown's own time ignored", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", nil, true' } } },
+    -- Codex on #47: timers keep their whole time; a secret payload is never read
+    { "a timer capped at the prompt timeout", { { "    local limit = timer and TIMER_LIMIT or PROMPT_TIMEOUT\n", "    local limit = PROMPT_TIMEOUT\n" } } },
+    { "a countdown capped at the prompt timeout", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", tonumber(Plain(timeRemaining))' } } },
+    { "a start timer capped at the prompt timeout", { { "tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true", "tostring(Plain(timerType)), tonumber(Plain(timeRemaining))" } } },
+    { "a secret countdown duration read", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", tonumber(timeRemaining), true' } } },
+    { "a secret value taken as plain", { { "    if ok and yes then return v end\n", "    do return v end\n" } } },
+    -- #39: the orbit follows cameraYawMoveSpeed
+    { "the orbit not scaled", { { "    return cfg.orbitSpeed * (180 / I.YawMoveSpeed())\n", "    return cfg.orbitSpeed\n" } } },
+    { "a bad turn speed not sent to 180", { { "    if v <= 0 then v = 180 end\n", "" } } },
+    -- Codex on #48: the setting is read when the orbit starts or resumes
+    { "the settled orbit uses the speed of Enter", {
+        { "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end\nend",
+          "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\nend" } } },
+    { "the resumed orbit uses the speed of Enter", {
+        { "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end\n    cam.mode, cam.elapsed",
+          "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\n    cam.mode, cam.elapsed" } } },
+    -- #38: the female column
+    { "the female column ignored", { { "local f = (tonumber(sex) == 3 and lib.FEMALE_SHOULDER_FACTORS[id])", "local f = (false and lib.FEMALE_SHOULDER_FACTORS[id])" } } },
+    { "the player's sex not asked", { { '    if type(UnitSex) == "function" then sex = UnitSex("player") end\n', "" } } },
+    { "the female table replaced on load", { { "lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {", "lib.FEMALE_SHOULDER_FACTORS = fill({}, {" } } },
+    { "an unknown race not sent to the default", { { "    if not lib.SHOULDER_FACTORS[id] then id = 0 end\n", "" } } },
+    { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
 }
 
 local source = read("LibShowcase.lua")
