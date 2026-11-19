@@ -31,8 +31,8 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 | `SC:DropPopup(dialog)` | A no-op, kept for API stability. |
 
 Library functions (dot): `lib.SuppressExperimentalCVarPopup()` (returns a count),
-`lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?)`. Public tables, filled in place:
-`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
+`lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?, sex?)` (`sex` 3 is female, MINOR 8, #38). Public tables, filled in place:
+`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS` (the male column), `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
 `lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`) and
 `lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4).
 
@@ -286,6 +286,8 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 ## Deliberate differences from AltStable's block
 
 - One owner, enforced (AltStable had a single caller).
+- A female character's shoulder offset uses the female pair (`lib.FEMALE_SHOULDER_FACTORS`, #38);
+  AltStable used the male column for everyone. `tests/test_parity.lua` runs a male character.
 - The orbit is scaled by the player's `cameraYawMoveSpeed` (#39); AltStable scaled only the entry
   turn, so its orbit sped up or slowed down with the setting. The same at the default 180, where
   `tests/test_parity.lua` runs.

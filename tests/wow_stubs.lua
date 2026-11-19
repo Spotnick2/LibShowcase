@@ -81,6 +81,7 @@ table.insert(WoW.onReset, function()
     WoW.loggedIn = false
     WoW.mounted = false
     WoW.race = { "Human", "Human", 1 }
+    WoW.sex = 2
     WoW.cvars = {}
     for k, v in pairs(WoW.DEFAULT_CVARS) do WoW.cvars[k] = v end
     WoW.camera = { zoom = 4, view = 1, savedViews = {}, yaw = nil, pitchlimit = 88 }
@@ -209,6 +210,7 @@ function GetLootRollTimeLeft(id) return WoW.lootRolls[id] or 0 end
 function IsLoggedIn() return WoW.loggedIn end
 function IsMounted() return WoW.mounted end
 function UnitRace(unit) return WoW.race[1], WoW.race[2], WoW.race[3] end
+function UnitSex(unit) return WoW.sex end   -- 2 male, 3 female (the dump: optional sex:number)
 
 function GetCVar(name) return WoW.cvars[name] end
 function SetCVar(name, value)

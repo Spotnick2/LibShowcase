@@ -132,7 +132,7 @@ do
     local held = {
         lib = lib, impl = lib.impl, methods = lib.methods, instances = lib.instances, state = lib.state,
         cam = lib.state.cam, lifts = lib.state.lifts, CENTRING = lib.CENTRING_CVARS,
-        FACTORS = lib.SHOULDER_FACTORS, human = lib.SHOULDER_FACTORS[1], RACE_IDS = lib.RACE_IDS,
+        FACTORS = lib.SHOULDER_FACTORS, human = lib.SHOULDER_FACTORS[1], RACE_IDS = lib.RACE_IDS, FEMALE = lib.FEMALE_SHOULDER_FACTORS,
         animFrame = lib.animFrame, eventFrame = lib.eventFrame, enter = A.Enter, opts = A.opts,
         hook = SetUIVisibility, suppress = lib.SuppressExperimentalCVarPopup, shoulder = lib.ShoulderOffsetFor,
         mt = lib.instanceMT, dialogHook = StaticPopup_Show, specialHook = StaticPopupSpecial_Show,
@@ -152,7 +152,8 @@ do
     eq(lib.state.cam, held.cam, "the camera state too")
     eq(lib.state.lifts, held.lifts, "and the lift records")
     check(lib.CENTRING_CVARS == held.CENTRING and lib.SHOULDER_FACTORS == held.FACTORS
-          and lib.SHOULDER_FACTORS[1] == held.human and lib.RACE_IDS == held.RACE_IDS,
+          and lib.SHOULDER_FACTORS[1] == held.human and lib.RACE_IDS == held.RACE_IDS
+          and held.FEMALE ~= nil and lib.FEMALE_SHOULDER_FACTORS == held.FEMALE,
           "public tables filled in place")
     eq(lib.instanceMT, held.mt, "the instance metatable too")
     eq(lib.SuppressExperimentalCVarPopup, held.suppress, "lib.SuppressExperimentalCVarPopup is the same function")
