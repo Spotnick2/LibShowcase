@@ -52,6 +52,10 @@ WoW.PROTECTED.SetParent = true
 --   again (LibShowcase.lua, I.DropRecord). The core's SetParent runs first
 --   (it takes the subtree's visibility as reported); the scripts then fire
 --   where it changed, parents first.
+-- REMOVE THIS OVERRIDE IN THE SAME CHANGE that moves tests/kit.pin past the
+-- kit's fix (Spotnick2/WowTestKit#100): with both, every OnShow / OnHide
+-- fires twice (test_lease's "fired the frame's OnHide" goes red), and the
+-- kit measured a parentless frame's level as 0, where this gives 1.
 local coreSetParent = Methods.SetParent
 local function reported(w, list)
     list[#list + 1] = { w, w._vis }

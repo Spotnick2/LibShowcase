@@ -33,7 +33,6 @@ $luac = Join-Path (Split-Path -Parent $Lua) "luac.exe"
 if (Test-Path -LiteralPath $luac) {
     & $luac -p (Join-Path $src "LibShowcaseProbe.lua")
     if ($LASTEXITCODE -ne 0) { Write-Error "luac -p failed on the probe's Lua"; exit 1 }
-    Remove-Item -LiteralPath "luac.out" -ErrorAction SilentlyContinue
 } else {
     Write-Host "  luac -p SKIPPED (no $luac)" -ForegroundColor Yellow
 }
@@ -45,7 +44,7 @@ $hostDeploy = Join-Path $ForeverProbe "Tools\deploy.ps1"
 if (-not (Test-Path -LiteralPath $hostDeploy)) {
     Write-Error "ForeverProbe checkout not found at $ForeverProbe (or set `$env:FOREVERPROBE)"; exit 1
 }
-& pwsh -NoProfile -File $hostDeploy -AddOnsPath $AddOnsPath
+& pwsh -NoProfile -File $hostDeploy -AddOnsPath $AddOnsPath -Lua $Lua
 if ($LASTEXITCODE -ne 0) { Write-Error "ForeverProbe deploy refused; LibShowcaseProbe was not touched"; exit 1 }
 
 # 2. The library, from this checkout (a child process: its exit codes stay its own).
