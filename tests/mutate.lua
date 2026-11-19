@@ -74,8 +74,8 @@ local M = {
     { "combat start does not restore", { { 'if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_LOGOUT"', 'if event == "PLAYER_LOGOUT"' } } },
     { "the owner is not told", { { "        I.Notify(inst, event == \"PLAYER_REGEN_DISABLED\" and \"combat\"", "        I.Notify(nil, event == \"PLAYER_REGEN_DISABLED\" and \"combat\"" } } },
     -- The UI and lifts
-    { "the UI flag cleared after the re-show", { { "    st.uiHidden = false\n    if type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end",
-                                                   "    if type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end\n    st.uiHidden = false" } } },
+    { "the UI flag cleared after the re-show", { { "    st.uiHidden, st.showOwed = false, nil\n    if not shown and type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end",
+                                                   "    if not shown and type(SetUIVisibility) == \"function\" then pcall(SetUIVisibility, true) end\n    st.uiHidden, st.showOwed = false, nil" } } },
     { "no exit when the consumer ignores Escape", { { '    if st.cam.active and st.cam.mode ~= "exit" then I.Exit(inst, "ui-shown") end\n', "" } } },
     { "GameTooltip not lifted", { { '    if GameTooltip then I.Lift(inst, GameTooltip, "TOOLTIP") end\n', "" } } },
     { "a second lift saves the lifted state", { { "    if I.FindLift(frame) then return true end\n", "" } } },
@@ -87,9 +87,9 @@ local M = {
     { "no StaticPopup_Show hook", { { '        hooksecurefunc("StaticPopup_Show", function() lib.impl.OnStaticPopupShow() end)\n', "" } } },
     { "no StaticPopupSpecial_Show hook", { { '        hooksecurefunc("StaticPopupSpecial_Show", function() lib.impl.OnStaticPopupSpecialShow() end)\n', "" } } },
     { "a refused dialog reveals", { { "    if st.uiHidden and I.AnyDialogShown() then", "    if st.uiHidden then" } } },
-    { "the reveal acts with the UI up", { { "    if not inst or not st.uiHidden then return false end\n    I.ShowUI()", "    if not inst then return false end\n    I.ShowUI()" } } },
-    { "the reveal read as Escape", { { "    I.ShowUI()\n    I.Debug(inst, \"game UI shown", "    pcall(SetUIVisibility, true)\n    I.Debug(inst, \"game UI shown" } } },
-    { "the reveal ends the presentation", { { "    I.ShowUI()\n    I.Debug(inst, \"game UI shown", "    I.Restore(inst, \"dialog\")\n    I.Debug(inst, \"game UI shown" } } },
+    { "the reveal acts with the UI up", { { "    if not inst or not st.uiHidden then return false end\n    I.ShowUI()\n    if st.uiHidden then", "    if not inst then return false end\n    I.ShowUI()\n    if st.uiHidden then" } } },
+    { "the reveal read as Escape", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    pcall(SetUIVisibility, true)\n    if false then\n" } } },
+    { "the reveal ends the presentation", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.Restore(inst, \"dialog\")\n    if false then\n" } } },
     { "onGameUIShown not called", { { "    I.NotifyShown(inst, reason)\n", "" } } },
     { "LiftPopup touches the dialog", { { '    if I.IsOwner(inst) then I.RevealForDialog("dialog") end\n',
                                           '    if I.IsOwner(inst) then I.RevealForDialog("dialog") end\n    if dialog then pcall(dialog.SetFrameStrata, dialog, "FULLSCREEN_DIALOG") end\n' } } },
@@ -100,8 +100,8 @@ local M = {
     { "no suppression before the offset write", { { "    I.SuppressExperimentalCVarPopup()\n    pcall(SetCVar, \"test_cameraOverShoulder\", desired)",
                                                     "    pcall(SetCVar, \"test_cameraOverShoulder\", desired)" } } },
     { "re-registered after a restore (taints the dialog pool)", {
-        { "    I.DropAll()\n    I.MaybeRelease()\n    if wasActive",
-          "    I.DropAll()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, GameEvent.HandleExperimentalCVarConfirmationNeeded)\n    I.MaybeRelease()\n    if wasActive" } } },
+        { "    if not st.uiHidden then I.DropAll() end\n    I.MaybeRelease()\n    if wasActive",
+          "    if not st.uiHidden then I.DropAll() end\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, GameEvent.HandleExperimentalCVarConfirmationNeeded)\n    I.MaybeRelease()\n    if wasActive" } } },
     { "an older copy's timer re-registers", {
         { "function I.UnsuppressPopup()\nend\n",
           "function I.UnsuppressPopup()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...) return GameEvent.HandleExperimentalCVarConfirmationNeeded(...) end)\nend\n" } } },
@@ -187,6 +187,13 @@ local M = {
     { "Enter does not hide names", { { "    I.SyncNames()\n    if cfg.castAware", "    if cfg.castAware" } } },
     { "the names capture not in the db", { { "    if db and n > 0 then db[lib.NAMES_DB_KEY] = cap end\n", "" } } },
     { "the names capture in the camera capture", { { "lib.NAMES_DB_KEY = \"LibShowcaseNames\"", "lib.NAMES_DB_KEY = \"LibShowcaseCapture\"" } } },
+    -- #42: SetUIVisibility is blocked in a lockdown
+    { "ShowUI ignores the lockdown", { { "    if not shown and Locked() then\n        st.showOwed = true\n        return false\n    end\n", "" } } },
+    { "the lifts dropped while the show is owed", { { "    if not st.uiHidden then I.DropAll() end", "    I.DropAll()" } } },
+    { "the owed reveal never told", { { "            I.NotifyShown(owner, reason)\n", "" } } },
+    { "a blocked call read as Escape", { { "    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end\n", "" } } },
+    { "the player's Escape shown again by the library", { { "    if st.uiHidden then I.ShowUI(true) end", "    if st.uiHidden then I.ShowUI() end" } } },
+    { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
 }
 
 local source = read("LibShowcase.lua")

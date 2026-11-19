@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 4
+local MAJOR, MINOR = "LibShowcase-1.0", 5
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -247,6 +247,13 @@ end
 --------------------------------------------------------------------------------
 
 local function InCombat()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
+end
+
+-- The lockdown itself: what blocks SetUIVisibility from addon code (MEASURED
+-- 70959, docs/DESIGN.md "Combat"). Kept apart from InCombat, which may come
+-- to mean "combat has started" (#21) while SetUIVisibility still works.
+local function Locked()
     return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
 end
 
@@ -499,10 +506,20 @@ end
 
 -- The core restore: no lease check, no release. Clears the flag BEFORE the
 -- engine call, so the SetUIVisibility hook sees a restore already under way.
-function I.ShowUI()
+-- `shown`: the UI is already back (the player's own Alt+Z or Escape, which
+-- the lockdown doesn't block): only the record and the lifts follow it.
+-- In a lockdown SetUIVisibility from addon code is BLOCKED (MEASURED 70959):
+-- the call is not made, the UI stays marked hidden (so the lease is held)
+-- and the lifts stay up (a window put back under the hidden UI would vanish),
+-- and PLAYER_REGEN_ENABLED shows it (#42). Returns true when the UI is back.
+function I.ShowUI(shown)
     if not st.uiHidden then return false end
-    st.uiHidden = false
-    if type(SetUIVisibility) == "function" then pcall(SetUIVisibility, true) end
+    if not shown and Locked() then
+        st.showOwed = true
+        return false
+    end
+    st.uiHidden, st.showOwed = false, nil
+    if not shown and type(SetUIVisibility) == "function" then pcall(SetUIVisibility, true) end
     I.DropAll()
     return true
 end
@@ -657,6 +674,13 @@ function I.RevealForDialog(reason)
     local inst = st.owner
     if not inst or not st.uiHidden then return false end
     I.ShowUI()
+    if st.uiHidden then
+        -- In a lockdown: the UI comes back at PLAYER_REGEN_ENABLED, and the
+        -- owner is told then, not now (#42).
+        st.revealOwed = reason
+        I.Debug(inst, "game UI owed after combat: " .. tostring(reason))
+        return true
+    end
     I.Debug(inst, "game UI shown: " .. tostring(reason))
     I.NotifyShown(inst, reason)
     I.MaybeRelease()
@@ -1138,7 +1162,9 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
-    I.DropAll()
+    -- The lifts stay while the UI is still hidden (a show owed after the
+    -- lockdown, #42): PLAYER_REGEN_ENABLED drops them with it.
+    if not st.uiHidden then I.DropAll() end
     I.MaybeRelease()
     if wasActive then I.Debug(inst, "restored: " .. tostring(reason or "force")) end
 end
@@ -1312,8 +1338,14 @@ function I.OnEvent(event, ...)
         return
     end
     if event == "PLAYER_REGEN_ENABLED" then
-        -- Deferred drops of protected frames; a hide that outlived combat.
-        if st.uiHidden then I.ShowUI() end
+        -- Deferred drops of protected frames; a hide that outlived combat,
+        -- or a show the lockdown blocked (#42), with the owner told now.
+        local owner, reason = st.owner, st.revealOwed
+        st.revealOwed = nil
+        if st.uiHidden and I.ShowUI() and reason and owner then
+            I.Debug(owner, "game UI shown: " .. tostring(reason))
+            I.NotifyShown(owner, reason)
+        end
         I.DropDeferred()
         I.MaybeRelease()
         return
@@ -1350,10 +1382,14 @@ end
 -- clears uiHidden first, so it never lands here.
 function I.OnSetUIVisibility(visible)
     if not visible or not st.uiHidden or not st.owner then return end
+    -- A call the lockdown blocked (an addon's) changes nothing: only a UI
+    -- actually back is the player's Escape or Alt+Z.
+    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end
     local inst = st.owner
+    st.showOwed, st.revealOwed = nil, nil
     I.Notify(inst, "ui-shown")
     if st.owner ~= inst then return end
-    if st.uiHidden then I.ShowUI() end
+    if st.uiHidden then I.ShowUI(true) end
     if st.cam.active and st.cam.mode ~= "exit" then I.Exit(inst, "ui-shown") end
     I.MaybeRelease()
 end

@@ -186,9 +186,9 @@ do
     SetUIVisibility(false)
     eq(mark("OnSetUIVisibility"), h0 + 1, "the SetUIVisibility hook runs the newer code, once (and returns early)")
     SetUIVisibility(true)
-    -- Escape: the hook once, plus once more for the library's own re-show
-    -- inside it (one hook run per SetUIVisibility call, never two).
-    eq(mark("OnSetUIVisibility"), h0 + 3, "  and on Escape")
+    -- Escape: the hook once. The UI is already back, so the library makes
+    -- no re-show call of its own (#42; r4 made one, a second hook run).
+    eq(mark("OnSetUIVisibility"), h0 + 2, "  and on Escape")
     eq(mark("Exit"), n0 + 1, "  which exits through the newer copy")
     ticks(0.1, 10)
     check(not A:IsOwner(), "the presentation finishes under the newer copy")

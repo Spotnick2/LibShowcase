@@ -120,7 +120,8 @@ copies: never edit them here. A kit need is an issue on the kit, worked around i
 repo has no CI.
 
 - `tests\wow_stubs.lua`: this library's part of the mock, every stubbed global confirmed in the
-  API dump: camera, CVars, `SetUIVisibility`, the StaticPopup pool, `WoW.enterCombat` /
+  API dump: camera, CVars, `SetUIVisibility` (blocked from addon code in combat, MEASURED 70959;
+  `WoW.playerSetUIVisibility` is the player's own Alt+Z / Escape), the StaticPopup pool, `WoW.enterCombat` /
   `leaveCombat`, `SetParent` refused on a protected frame in combat; every global camera call
   logged in order (`WoW.calls`). Strict globals, widgets, events (checked against the build),
   timers and combat lockdown (`WoW.combat`) are the kit's.
