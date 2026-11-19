@@ -383,6 +383,12 @@ S.Run()
 eq(rec.at, 2, "sound 1: a hard target goes on")
 -- The Alt+Z control is observed (Codex, PR #50): a hide without a hard
 -- target doesn't count, a hide with one then a show does.
+-- A showcase's own hide and show never count (Codex, PR #50).
+local other4 = LibStub("LibShowcase-1.0"):New({ owner = "AnotherAddon" })
+check(other4:Enter(newWindow()) and not UIParent:IsShown(), "another addon's showcase hides the UI")
+other4:ForceRestore(); ticks(0.1, 20); WoW.flushTimers()
+S.Poll()
+eq(rec.at, 2, "sound 2: a showcase's hide and show don't pass the control")
 hasTarget = false
 WoW.playerSetUIVisibility(false); hasTarget = true; WoW.playerSetUIVisibility(true)
 S.Poll()

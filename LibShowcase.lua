@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 9
+local MAJOR, MINOR = "LibShowcase-1.0", 10
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1045,6 +1045,25 @@ function I.WriteShoulder(cam)
     return desired
 end
 
+-- Gamepad mode: Blizzard_Gamepad/Core.lua holds the centring CVars with TEMP
+-- values (C_CVar.SetTempCVar: KeepCharacterCentered 1, ReduceUnexpected 0).
+-- MEASURED 70959 (/fp steps ls tempcvar, runs #474 to #476; #54): under a
+-- temp, GetCVar reads the temp and a SetCVar is invisible but lands on the
+-- player's stored value. So a capture there would take the temp for the
+-- player's value, and its restore would write it over theirs. In gamepad
+-- mode the centring CVars are left alone. The same test as Blizzard's
+-- InputUtil.IsGamepadUIEnabled(); both names are in the 70959 dump, and the
+-- enum's Gamepad value is 1 (InputDeviceInterfaceType).
+function I.GamepadMode()
+    local style = rawget(_G, "C_InputInterfaceStyle")
+    if type(style) ~= "table" or type(style.GetCurrentStyle) ~= "function" then return false end
+    local enum = rawget(_G, "Enum")
+    local types = type(enum) == "table" and enum.InputDeviceInterfaceType
+    local gamepad = type(types) == "table" and types.Gamepad or 1
+    local ok, current = pcall(style.GetCurrentStyle)
+    return ok and current == gamepad
+end
+
 function I.WriteExtras(cam)
     local cfg, cap = cam.cfg, cam.capture
     if cfg.viewBlendStyle and cap.viewBlendStyle ~= nil then
@@ -1111,11 +1130,18 @@ function I.Enter(inst, anchor)
     I.SetZoom(cam.enterToZoom)
 
     if type(GetCVar) == "function" and type(SetCVar) == "function" then
-        for _, cvar in ipairs(lib.CENTRING_CVARS) do
-            local prev = GetCVar(cvar)
-            if prev ~= nil then
-                capture[cvar] = prev
-                pcall(SetCVar, cvar, "0")
+        -- In gamepad mode the reads would be the temps and the writes would
+        -- land unseen on the player's stored values: nothing is captured or
+        -- written (#54).
+        if I.GamepadMode() then
+            I.Debug(inst, "gamepad mode: the centring CVars are left alone")
+        else
+            for _, cvar in ipairs(lib.CENTRING_CVARS) do
+                local prev = GetCVar(cvar)
+                if prev ~= nil then
+                    capture[cvar] = prev
+                    pcall(SetCVar, cvar, "0")
+                end
             end
         end
         local shoulder = GetCVar("test_cameraOverShoulder")
@@ -1191,6 +1217,12 @@ function I.RestoreCapture(cap)
             I.SuppressExperimentalCVarPopup()
             pcall(SetCVar, "test_cameraOverShoulder", cap.shoulderOffset)
         end
+        -- Written back whatever the input mode now: in gamepad mode the write
+        -- lands on the stored value, unseen, which is where it belongs. Any
+        -- capture of them (an older copy's too, even one taken under
+        -- gamepad mode's temps) comes with that copy's "0" already written
+        -- over the stored values, so writing the capture is never worse than
+        -- leaving the "0" (#54; Codex on PR #55).
         for _, cvar in ipairs(lib.CENTRING_CVARS) do
             if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end
         end

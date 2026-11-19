@@ -123,7 +123,8 @@ repo has no CI.
   API dump: camera, CVars, `SetUIVisibility` (blocked from addon code in combat, MEASURED 70959;
   `WoW.playerSetUIVisibility` is the player's own Alt+Z / Escape), the StaticPopup pool, `WoW.enterCombat` /
   `leaveCombat` (`UnitAffectingCombat("player")` already true inside `PLAYER_REGEN_DISABLED`, the
-  lockdown after it, MEASURED 70959), `SetParent` refused on a protected frame in combat; every global camera call
+  lockdown after it, MEASURED 70959), temp CVars and the input style (`WoW.gamepadMode(on)`: a
+  read returns the temp, a `SetCVar` lands unseen on the stored value, MEASURED 70959), `SetParent` refused on a protected frame in combat; every global camera call
   logged in order (`WoW.calls`). Strict globals, widgets, events (checked against the build),
   timers and combat lockdown (`WoW.combat`) are the kit's.
 - `tests\harness.lua` loads the library **through the XML's order**; `ticks(dt, n)` runs `n`

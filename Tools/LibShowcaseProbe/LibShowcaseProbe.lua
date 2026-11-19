@@ -696,6 +696,15 @@ end
 local soundCtl = {}
 local function SoundControlHook(shown)
     if not soundCtl.armed or soundCtl.done then return end
+    -- A change made while a showcase holds the lease is the library's (its
+    -- hide and show), or happens inside a presentation: never the control.
+    -- It also cancels a half-seen one (Codex, PR #50).
+    local state = lib().state
+    if type(state) == "table" and state.owner ~= nil then
+        if soundCtl.hid ~= nil then say("  control: a showcase changed the UI; start the control again") end
+        soundCtl.hid = nil
+        return
+    end
     if not shown and not UIParent:IsShown() then
         local hard = G("UnitExists") and UnitExists("target") and not (G("IsTargetLoose") and IsTargetLoose())
         soundCtl.hid = hard and true or false
