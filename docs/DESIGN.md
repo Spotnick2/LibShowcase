@@ -61,7 +61,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
 | `castAware` | false | PortalRoulette: a player cast returns to the settled view and holds still; its end resumes the orbit |
-| `dynamicPitch` | false | `test_cameraDynamicPitch` = 1 (see Open measurements) |
+| `dynamicPitch` | false | `test_cameraDynamicPitch` = 1. MEASURED 70959 (`/fp steps ls pitch`, 2026-11-19, centring cleared): the write raises the camera angle at once (the character lower on screen, more above it in view), the angle follows the zoom, nothing follows the movement, and the view comes back on restore. Clearing centring alone moved nothing. 69913 had read it as inert |
 | `pitchLimit` | nil | `ConsoleExec("pitchlimit N")`, `pitchlimit 88` on restore |
 | `viewBlendStyle` | nil | `cameraViewBlendStyle` |
 | `hideWorldNames` | false | MINOR 4: world name text off while the showcase is up (Guarantees, World names) |
@@ -284,7 +284,6 @@ were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
 | Question | Procedure |
 |---|---|
-| Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/fp steps ls pitch` |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/fp steps ls nudge` (without, then with) |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/fp steps ls combat` |
 | The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/fp steps ls prompts` (a ready check or a loot roll waiting, then answered) |
