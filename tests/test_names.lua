@@ -97,7 +97,7 @@ do
 
     SC:Exit("closed")
     namesOff(lib, "still off during the exit animation")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not SC:IsOwner(), "the exit finishes")
     namesAre(lib, MIXED, "every name exactly as the player had it")
     eq(DB.LibShowcaseNames, nil, "  and the capture is cleared")
@@ -150,7 +150,7 @@ do
     local SC = lib:New({ owner = "A", hideWorldNames = true })
     SC:Enter(newWindow())
     SetUIVisibility(true)                         -- Escape
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     namesAre(lib, MIXED, "Escape/Alt+Z: the names come back with the exit")
 
     for _, ev in ipairs({ "PLAYER_LOGOUT", "PLAYER_ENTERING_WORLD" }) do
@@ -172,7 +172,7 @@ do
     local realSet = SetCVar
     local inLockdown = 0
     rawset(_G, "SetCVar", function(name, value)
-        if WoW.inCombat and name:find("^UnitName") then inLockdown = inLockdown + 1 end
+        if WoW.combat and name:find("^UnitName") then inLockdown = inLockdown + 1 end
         return realSet(name, value)
     end)
     WoW.enterCombat()

@@ -172,7 +172,7 @@ end
 ------------------------------------------------------------------------------
 
 local function openSettleClose(v)
-    v.enter(); WoW.tick(0.1, 20); v.exit(); WoW.tick(0.1, 6)
+    v.enter(); ticks(0.1, 20); v.exit(); ticks(0.1, 6)
 end
 
 local a, b = compare("defaults: open, settle, close", {}, openSettleClose)
@@ -200,19 +200,19 @@ compare("non-numeric config values fall back", {
 }, openSettleClose)
 
 compare("re-entered during the exit animation", {}, function(v)
-    v.enter(); WoW.tick(0.1, 5); v.exit(); WoW.tick(0.1, 1); v.enter(); WoW.tick(0.1, 20); v.force()
+    v.enter(); ticks(0.1, 5); v.exit(); ticks(0.1, 1); v.enter(); ticks(0.1, 20); v.force()
 end)
 
 compare("combat mid-swing", {}, function(v)
-    v.enter(); WoW.tick(0.1, 3); WoW.enterCombat(); WoW.tick(0.1, 10); WoW.leaveCombat()
+    v.enter(); ticks(0.1, 3); WoW.enterCombat(); ticks(0.1, 10); WoW.leaveCombat()
 end)
 
 compare("loading screen mid-orbit", {}, function(v)
-    v.enter(); WoW.tick(0.1, 20); WoW.fire("PLAYER_ENTERING_WORLD"); WoW.tick(0.1, 5)
+    v.enter(); ticks(0.1, 20); WoW.fire("PLAYER_ENTERING_WORLD"); ticks(0.1, 5)
 end)
 
 compare("Escape with the UI hidden", {}, function(v)
-    v.enter(); WoW.tick(0.1, 2); SetUIVisibility(true); WoW.tick(0.1, 10)
+    v.enter(); ticks(0.1, 2); SetUIVisibility(true); ticks(0.1, 10)
 end)
 
 compare("a client without the centring CVars", {
@@ -220,7 +220,7 @@ compare("a client without the centring CVars", {
 }, openSettleClose)
 
 compare("closed mid-swing", {}, function(v)
-    v.enter(); WoW.tick(0.1, 4); v.exit(); WoW.tick(0.1, 10)
+    v.enter(); ticks(0.1, 4); v.exit(); ticks(0.1, 10)
 end)
 
 done("test_parity")

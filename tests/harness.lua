@@ -1,25 +1,13 @@
--- harness.lua: assertions and the library loader. dofile it after wow_stubs.lua.
--- Run from the repo root so the relative paths resolve.
+-- harness.lua: the library loader and helpers. dofile it after wow_stubs.lua.
+-- Run from the repo root so the relative paths resolve. The assertions (check,
+-- eq, done) are WowTestKit's.
 --
 -- LIBSHOWCASE_MUTANT (tests/mutate.lua): a path whose content replaces
 -- LibShowcase.lua, so the suite can be run against a deliberately broken copy.
 
-local passed, failed = 0, 0
-
-function check(cond, msg)
-    if cond then passed = passed + 1 else
-        failed = failed + 1
-        io.write("  FAIL: " .. tostring(msg) .. "\n")
-    end
-end
-
-function eq(actual, expected, msg)
-    check(actual == expected, string.format("%s: expected %s, got %s", msg, tostring(expected), tostring(actual)))
-end
-
-function done(name)
-    io.write(string.format("%s: %d passed, %d failed\n", name, passed, failed))
-    os.exit(failed == 0 and 0 or 1)
+-- `n` rendered frames of `dt` seconds each (the kit's WoW.tick is one).
+function ticks(dt, n)
+    for _ = 1, n or 1 do WoW.tick(dt) end
 end
 
 function readFile(path)
