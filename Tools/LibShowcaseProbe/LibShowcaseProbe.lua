@@ -15,7 +15,7 @@
 --             really true (it isn't in PLAYER_REGEN_DISABLED, MEASURED 70205)
 --   prompts   every return of the prompt getters the library asks before
 --             hiding, with a ready check (or a loot roll) waiting, then not
---   invite    a friend's party or guild invite while presenting: the UI comes
+--   invite    a friend's party, guild or dungeon invite while presenting: the UI comes
 --             back, the camera keeps orbiting, accepting and Logout work.
 --             The probe never shows a Blizzard dialog itself.
 --   names     hideWorldNames in a crowded place, then the values after the
@@ -188,13 +188,35 @@ local window
 local Show
 local uiShown = {}           -- the onGameUIShown reasons, in order
 local namesOpen              -- "show" or "ui" while a names check holds the names hidden
+local function InviteReady()
+    if not (SC:IsActive() and SC:IsOwner()) then
+        return false, "another showcase holds the presentation: close it"
+    end
+    if not SC:IsGameUIHidden() then
+        return false, "a dialog or prompt kept the UI up: answer or close it"
+    end
+    return true, "presenting, the UI hidden"
+end
+
 local function Invite()
     say("== invite: the presentation opens with the UI hidden")
     if not (window and window:IsShown()) then Show() end
-    say("  ask a friend for a party or guild invite. Expect 'onGameUIShown dialog', the UI back,")
+    -- What the next step needs: the probe presenting with the UI hidden.
+    -- The window shown is not that: another addon's showcase holding the
+    -- lease (Enter -> busy, run #419), or a dialog or prompt already up
+    -- (Enter starts the camera, but the UI stays visible, so no invite can
+    -- bring it back).
+    local ready, why = InviteReady()
+    if not ready then
+        -- A failed run completes the step, so the panel moves on: the way
+        -- back is Back, then Open.
+        say("  the presentation is NOT ready: " .. why .. ", then press Back and Open again")
+        return false
+    end
+    say("  ask a friend for a party, guild or dungeon invite. Expect 'onGameUIShown dialog', the UI back,")
     say("  the camera still orbiting; accept it (no FORBIDDEN line), then /fp ls show to close.")
     say("  Then open the game menu and Quit/Logout: it must work (cancel the countdown).")
-    return window:IsShown()
+    return true
 end
 
 -- 5. The whole presentation. `hint`: once it closes, log the /console line
@@ -587,8 +609,11 @@ Probe:Steps("invite", {
           uiShown = {}
           if window and window:IsShown() then window:Hide() end
           return Invite()
-      end },
-    { text = "Ask the friend for a party or guild invite. This step completes when the dialog brings the UI back.",
+      end,
+      -- Not ready (another showcase, or the UI kept up) is a FAIL here, not a
+      -- step that reads "true" (run #419).
+      check = InviteReady },
+    { text = "Ask the friend for a party, guild or dungeon invite (say which in the Note box). This step completes when the invite brings the UI back.",
       timeout = 600, wait = function()
           for _, r in ipairs(uiShown) do if r == "dialog" then return true, "onGameUIShown dialog" end end
           return false, "waiting for the invite's dialog"
@@ -683,6 +708,14 @@ ev:SetScript("OnEvent", function(_, event, a1)
             say("StaticPopup_Show " .. tostring(which))
             C_Timer.After(0, function() DialogTaint(tostring(which)) end)
         end)
+        -- The special popups (a frame shown whole, the dungeon-invite role
+        -- prompt on Retail): named, only read. The library hooks this too.
+        if type(G("StaticPopupSpecial_Show")) == "function" then
+            hooksecurefunc("StaticPopupSpecial_Show", function(frame)
+                local name = type(frame) == "table" and frame.GetName and frame:GetName()
+                say("StaticPopupSpecial_Show " .. tostring(name or frame))
+            end)
+        end
         say(("loaded (%d loads), LibShowcase r%s. /fp ls for the commands, /fp steps for the procedures")
             :format(LibShowcaseProbeDB.loads, tostring(minor)))
     elseif event == "PLAYER_REGEN_DISABLED" and combat.state == "armed" then

@@ -171,9 +171,9 @@ end
 
 -- Prompt getters: in the dump by NAME only (the _G walk), no signature. The
 -- shapes are Retail's. MEASURED on 70959 (/fp steps ls prompts; docs/DESIGN.md):
--- the ready check, and the LFG getters and the roll list with nothing pending.
--- A populated roll list, GetLootRollTimeLeft and a pending LFG proposal or role
--- check are still UNMEASURED (docs/DESIGN.md, Open measurements).
+-- the ready check, a loot roll (GetLootRollTimeLeft in milliseconds), and the
+-- getters with nothing pending. Forever has no dungeon finder: the LFG getters
+-- never report a pending proposal or role check there.
 function GetReadyCheckStatus(unit)
     return unit == "player" and WoW.readyCheck and WoW.readyCheck.status or nil
 end

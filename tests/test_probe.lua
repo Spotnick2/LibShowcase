@@ -96,6 +96,10 @@ local d = StaticPopup_Show("PARTY_INVITE")
 check(UIParent:IsShown() and SC:IsActive(), "  a dialog brings the UI back, the presentation kept")
 check(logHas("onGameUIShown dialog"), "  and the probe logs why")
 check(logHas("StaticPopup_Show PARTY_INVITE"), "every StaticPopup_Show is logged")
+local special = CreateFrame("Frame", "LFGInvitePopup", UIParent)
+StaticPopupSpecial_Show(special)
+check(logHas("StaticPopupSpecial_Show LFGInvitePopup"), "  and every StaticPopupSpecial_Show, by frame name")
+WoW.closeDialog(special)
 WoW.flushTimers()
 check(logHas("[PARTY_INVITE] dialog pool which=PARTY_INVITE: written SECURELY"), "  and, a frame later, how its `which` was written")
 WoW.closeDialog(d)
@@ -248,9 +252,31 @@ WoW.readyCheck = nil
 S.Next()
 eq(rec.status, "done", "the prompts procedure finishes (the last read on arrival)")
 
+-- Another addon's showcase holds the lease: Open must say the presentation
+-- did not start, as a FAIL (run #419), not "true".
+local other = LibStub("LibShowcase-1.0"):New({ owner = "AnotherAddon" })
+check(other:Enter(), "another addon presents")
 fp("steps ls invite")
 rec = record("invite")
 S.Run()
+eq(rec.results[1].check, "FAIL", "invite 1: a refused Enter is a FAIL")
+check(logHas("NOT ready: another showcase holds the presentation: close it, then press Back and Open again"),
+      "  and says why, and the way back the panel offers")
+other:ForceRestore()
+ticks(0.1, 20)
+WoW.flushTimers()
+-- A prompt already up: Enter starts the camera but the UI stays visible, so
+-- no invite could bring it back. Also a FAIL (Codex, PR #44).
+WoW.readyCheck = { status = "waiting", left = 30 }
+S.Back(); S.Run()
+eq(rec.results[1].check, "FAIL", "invite 1: the UI kept up by a pending prompt is a FAIL")
+check(logHas("a dialog or prompt kept the UI up: answer or close it"), "  and says why")
+WoW.readyCheck = nil
+win:Hide()
+ticks(0.1, 20)
+WoW.flushTimers()
+S.Back(); S.Run()
+eq(rec.results[1].check, "PASS", "invite 1: Back, then Open, with nothing in the way starts it")
 check(win:IsShown() and not UIParent:IsShown(), "invite 1: presenting")
 S.Poll()
 eq(rec.at, 2, "invite 2: waits for the dialog")
