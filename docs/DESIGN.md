@@ -55,7 +55,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `forceMounted` | false | |
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
-| `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed |
+| `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
 | `savedViewSlot` | 5 | 2-5, the player's own view |
 | `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot` |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
@@ -315,6 +315,8 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 - One owner, enforced (AltStable had a single caller).
 - A female character's shoulder offset uses the female pair (`lib.FEMALE_SHOULDER_FACTORS`, #38);
   AltStable used the male column for everyone. `tests/test_parity.lua` runs a male character.
+  Seen in game (70959, release check run #427): a female Night Elf framed to one side, in view.
+  A race the tables lack (Forever's Skyborne, 95: run #488) takes the default pair (#59).
 - The orbit is scaled by the player's `cameraYawMoveSpeed` (#39); AltStable scaled only the entry
   turn, so its orbit sped up or slowed down with the setting. The same at the default 180, where
   `tests/test_parity.lua` runs.
