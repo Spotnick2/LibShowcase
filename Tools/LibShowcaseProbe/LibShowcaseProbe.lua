@@ -1591,13 +1591,13 @@ end
 
 local function FramingStep(i)
     local letter = ({ "A", "B", "C", "D" })[i]
-    return { text = ("%s shows candidate %s (a screenshot follows). Note how the character sits."):format(letter, letter),
+    return { text = ("%s shows candidate %s (a screenshot follows). How far to the side is the character, and fully in view?"):format(letter, letter),
              button = letter, run = function() return FramingTry(i) end, screenshot = "framing " .. letter }
 end
 
 Probe:Steps("framing", {
     title = "The shoulder pair for a race the tables lack (#59)",
-    { text = "On the character to frame (a Skyborne one), out of combat, somewhere open. Open starts a presentation.",
+    { text = "On the character to frame, out of combat, somewhere open. You'll see four candidates, A to D, and pick the one that puts the character furthest to one side while fully in view: watch for that on each. Open starts a presentation.",
       button = "Open", run = OpenOrThrow },
     { text = "Waiting for the camera to settle.", timeout = 15, wait = FramingSettled },
     FramingStep(1), FramingStep(2), FramingStep(3), FramingStep(4),
