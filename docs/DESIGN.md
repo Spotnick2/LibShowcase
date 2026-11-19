@@ -136,14 +136,19 @@ owner.
   `GetReadyCheckTimeLeft() > 0`, `GetLFGProposal()`, `GetLFGRoleUpdate()`, and
   `GetLootRollTimeLeft(id) > 0` for each of `GetActiveLootRollIDs()`. These are in the 70205 dump by
   name only; each call is `pcall`ed, and an unexpected answer counts as "not open". MEASURED 70959
-  (`/fp steps ls prompts`, 2026-11-19): `GetReadyCheckStatus("player")` is `"waiting"` until the
-  player answers (`"ready"` for the one who started it), then nil; `GetReadyCheckTimeLeft()` counts
-  down in seconds, then 0; with nothing pending `GetLFGProposal()` returns nothing,
-  `GetLFGRoleUpdate()` returns `false, 0, 0, nil, nil, false`, and `GetActiveLootRollIDs()` a table:
-  Retail's shapes so far. Not yet seen, and they're what this check reads: a populated
-  `GetActiveLootRollIDs()` with `GetLootRollTimeLeft(id)`, and `GetLFGProposal()` /
-  `GetLFGRoleUpdate()` with a proposal or role check pending (Open measurements). The role poll and the PvP role popup
-  have no getter.
+  (`/fp steps ls prompts`, 2026-11-19, runs #460, #415 to #417): `GetReadyCheckStatus("player")` is
+  `"waiting"` until the player answers, then `"ready"` while the check runs on for the others (the
+  one who started it is `"ready"` from the start), then nil; `GetReadyCheckTimeLeft()` counts down
+  in seconds, then 0. So testing `"waiting"` (not the time left) is right: an answered player has
+  nothing to answer. With nothing pending `GetLFGProposal()` returns nothing, `GetLFGRoleUpdate()`
+  returns `false, 0, 0, nil, nil, false` and `GetActiveLootRollIDs()` an empty table: Retail's
+  shapes. Forever has **no automated dungeon finder** (the owner), so `GetLFGProposal`,
+  `GetLFGRoleUpdate` and the `LFG_PROPOSAL_*` / `LFG_ROLE_CHECK_*` events never report anything
+  there; they stay, harmless. No getter sees the role poll (`ROLE_POLL_BEGIN`; run #415), the PvP
+  role popup, or the role prompt that comes with a dungeon invite (run #417; it is not a
+  `StaticPopup_Show` dialog): the library knows them only by their events or dialog hooks. Not yet
+  seen: a loot roll up (a populated `GetActiveLootRollIDs()`, `GetLootRollTimeLeft(id)`), and
+  whether the dungeon-invite role prompt brings the UI back (Open measurements).
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
   through `READY_CHECK`.
@@ -295,7 +300,8 @@ were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
 | Question | Procedure |
 |---|---|
-| The prompt getters with a prompt pending, as the live-prompt check reads them: a populated `GetActiveLootRollIDs()` and `GetLootRollTimeLeft(id)` (a loot roll up), `GetLFGProposal()` (a dungeon finder proposal up), `GetLFGRoleUpdate()` (a role check up) | `/fp steps ls prompts` with that prompt up instead of a ready check |
+| A loot roll up: a populated `GetActiveLootRollIDs()` and `GetLootRollTimeLeft(id)`, as the live-prompt check reads them | `/fp steps ls prompts` with a group-loot roll window up |
+| The role prompt that comes with a dungeon invite, while presenting: does the UI come back? (the probe now logs `StaticPopupSpecial_Show` too) | `/fp steps ls invite` with that invite |
 
 Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the
 ready-check getters and the idle prompt getters, `SetUIVisibility` in a lockdown (above), and the
