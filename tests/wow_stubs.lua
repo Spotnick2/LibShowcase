@@ -83,6 +83,7 @@ table.insert(WoW.onReset, function()
     WoW.race = { "Human", "Human", 1 }
     WoW.sex = 2
     WoW.affecting = false
+    WoW.tempCVars, WoW.inputStyle = {}, 0
     WoW.cvars = {}
     for k, v in pairs(WoW.DEFAULT_CVARS) do WoW.cvars[k] = v end
     WoW.camera = { zoom = 4, view = 1, savedViews = {}, yaw = nil, pitchlimit = 88 }
@@ -217,7 +218,25 @@ function IsMounted() return WoW.mounted end
 function UnitRace(unit) return WoW.race[1], WoW.race[2], WoW.race[3] end
 function UnitSex(unit) return WoW.sex end   -- 2 male, 3 female (the dump: optional sex:number)
 
-function GetCVar(name) return WoW.cvars[name] end
+-- A temp CVar (C_CVar.SetTempCVar; gamepad mode puts them on the centring
+-- CVars): a read returns the temp, and a SetCVar is invisible but lands on
+-- the stored value underneath (MEASURED 70959, #54). WoW.gamepadMode(on)
+-- switches the input style and the temps as Blizzard_Gamepad/Core.lua does.
+function GetCVar(name)
+    local temp = WoW.tempCVars[name]
+    if temp ~= nil then return temp end
+    return WoW.cvars[name]
+end
+-- C_InputInterfaceStyle.GetCurrentStyle (70959 dump); Mkb 0, Gamepad 1.
+C_InputInterfaceStyle = { GetCurrentStyle = function() return WoW.inputStyle end }
+function WoW.gamepadMode(on)
+    WoW.inputStyle = on and 1 or 0
+    if on then
+        WoW.tempCVars.CameraKeepCharacterCentered, WoW.tempCVars.CameraReduceUnexpectedMovement = "1", "0"
+    else
+        WoW.tempCVars = {}
+    end
+end
 function SetCVar(name, value)
     log("SetCVar", name, value)
     if name:find("^test_") and WoW.internal[POPUP_EVENT] then WoW.popupShown = WoW.popupShown + 1 end
