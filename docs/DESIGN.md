@@ -151,8 +151,7 @@ owner.
   `StaticPopup_Show` dialog, but `StaticPopupSpecial_Show(LFGInvitePopup)`, run #419): the library
   knows them only by their events or dialog hooks. MEASURED 70959 (`/fp steps ls invite`, run #421):
   that popup while presenting gives `onGameUIShown("dialog")`, the UI back, the camera still
-  orbiting and the lease held; accepting and Logout work, no blocked action. (In run #419 a
-  presentation of AltStable's ended on it: that is AltStable's own handling, not the library's.)
+  orbiting and the lease held; accepting and Logout work, no blocked action.
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
   through `READY_CHECK`.
