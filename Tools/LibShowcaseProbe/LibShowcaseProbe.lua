@@ -584,7 +584,7 @@ Probe:Steps("combat", {
     { text = "Pull the mob and keep fighting. This step completes once both calls have run.", timeout = 300,
       wait = function()
           if combat.state == "done" or combat.state == "no lockdown" then
-              return true, combat.state, combat.hide, combat.show, combat.blockedText
+              return true, combat.state, "UnitAffectingCombat in the handler " .. tostring(combat.affecting), combat.hide, combat.show, combat.blockedText
           end
           return false, "combat check: " .. tostring(combat.state)
       end,
@@ -720,7 +720,12 @@ ev:SetScript("OnEvent", function(_, event, a1)
             :format(LibShowcaseProbeDB.loads, tostring(minor)))
     elseif event == "PLAYER_REGEN_DISABLED" and combat.state == "armed" then
         combat.state = "waiting"
-        say(("== combat started; InCombatLockdown() in the handler = %s"):format(tostring(InCombatLockdown())))
+        -- #21: is the client's own combat flag already true here, where the
+        -- lockdown is not yet (MEASURED 70205)? Then the library could tell
+        -- "combat has started" whatever the handlers' order.
+        combat.affecting = tostring(G("UnitAffectingCombat") and UnitAffectingCombat("player"))
+        say(("== combat started; in the handler InCombatLockdown() = %s, UnitAffectingCombat(\"player\") = %s")
+            :format(tostring(InCombatLockdown()), combat.affecting))
         RunCombatChecks(0)
     end
 end)
