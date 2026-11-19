@@ -36,6 +36,8 @@
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
+--   orbitspeed one full turn timed at cameraYawMoveSpeed 90 and 360: does
+--             MoveViewLeftStart's speed scale with it (#39)?
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -1329,6 +1331,65 @@ Probe:Steps("release", {
           say("  release: centring " .. now .. " (before " .. tostring(rel.centring) .. ")")
           return now == rel.centring, "centring " .. now .. ", before " .. tostring(rel.centring)
       end },
+})
+
+-- 16. #39's premise, measured: does MoveViewLeftStart's speed scale with
+-- cameraYawMoveSpeed? The same MoveViewLeftStart(ORBIT_TEST_SPEED) at 90
+-- and at 360; the tester presses Turned when the camera is back on the same
+-- landmark, and the probe times each full turn. A ratio near 4 means it
+-- scales (MINOR 7's compensation is right); near 1, it doesn't (the
+-- compensation slows the orbit at a faster setting). r10's release check
+-- (run #488) left it unclear.
+local ORBIT_TEST_SPEED = 0.1
+local orbitT = {}
+
+local function OrbitStart(yaw)
+    if window and window:IsShown() then window:Hide() end
+    if SC:IsActive() or SC:IsOwner() then error("a presentation is running: wait for it to end, then Retry", 0) end
+    Set("cameraYawMoveSpeed", yaw)
+    if tostring(GetCVar("cameraYawMoveSpeed")) ~= yaw and tonumber(GetCVar("cameraYawMoveSpeed")) ~= tonumber(yaw) then
+        error("cameraYawMoveSpeed did not take " .. yaw .. ": Retry", 0)
+    end
+    MoveViewLeftStop()
+    MoveViewLeftStart(ORBIT_TEST_SPEED)
+    orbitT[yaw] = { start = GetTime() }
+    return ("turning at MoveViewLeftStart(%s) with cameraYawMoveSpeed %s"):format(ORBIT_TEST_SPEED, yaw)
+end
+
+local function OrbitTurned(yaw)
+    MoveViewLeftStop()
+    local t = orbitT[yaw]
+    if not (t and t.start) then error("not started: Back to Start", 0) end
+    t.seconds = GetTime() - t.start
+    local line = ("cameraYawMoveSpeed %s: one turn in %.1f s"):format(yaw, t.seconds)
+    say("  orbitspeed: " .. line)
+    return line
+end
+
+local function OrbitVerdict()
+    local slow, fast = orbitT["90"], orbitT["360"]
+    if not (slow and slow.seconds and fast and fast.seconds and fast.seconds > 0) then
+        return false, "a turn was not timed"
+    end
+    local ratio = slow.seconds / fast.seconds
+    local verdict = ratio > 2.5 and "scales with cameraYawMoveSpeed (MINOR 7 is right)"
+        or ratio < 1.6 and "does NOT scale (MINOR 7's compensation is wrong)" or "unclear: time them again"
+    local line = ("90: %.1f s, 360: %.1f s, ratio %.2f: %s"):format(slow.seconds, fast.seconds, ratio, verdict)
+    say("== orbitspeed " .. line)
+    return ratio > 2.5 or ratio < 1.6, line
+end
+
+Probe:Steps("orbitspeed", {
+    title = "Does the orbit's speed scale with cameraYawMoveSpeed (#39)",
+    { text = "Out of combat, standing still, somewhere with a clear landmark (a tree, a building). Don't touch the mouse or the turn keys until the end. Start sets the turn speed to 90 and turns the camera.",
+      button = "Start", run = function() return OrbitStart("90") end },
+    { text = "Press Turned the moment the landmark is back where it was (one full turn).", button = "Turned",
+      run = function() return OrbitTurned("90") end },
+    { text = "Start again, at turn speed 360.", button = "Start", run = function() return OrbitStart("360") end },
+    { text = "Press Turned when the landmark is back where it was.", button = "Turned",
+      run = function() return OrbitTurned("360") end },
+    { text = "Comparing the two turns, then putting the turn speed back.", auto = true,
+      run = function() local ok, line = OrbitVerdict(); RestoreAll(); return ok, line end },
 })
 
 Probe:Steps("rereg", {

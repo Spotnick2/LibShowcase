@@ -692,6 +692,22 @@ check(logHas("release: centring 1/0 (before 1/0)"), "release 21: the centring CV
 rawset(_G, "C_InputInterfaceStyle", nil)
 WoW.sex = 2
 
+-- #39's premise: one full turn timed at 90 and at 360.
+WoW.cvars.cameraYawMoveSpeed = "180"
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "90", "orbitspeed 1: the turn speed at 90")
+check(hasCall("MoveViewLeftStart(0.1)"), "  the camera turning at a fixed speed")
+WoW.advance(40); S.Run()
+check(tostring(rec.results[2].detail):find("one turn in 40.0 s", 1, true), "orbitspeed 2: the turn timed")
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "360", "orbitspeed 3: the turn speed at 360")
+WoW.advance(10); S.Run()
+eq(rec.status, "done", "the orbitspeed procedure finishes")
+check(tostring(rec.results[5].detail):find("ratio 4.00: scales", 1, true), "orbitspeed 5: a ratio of 4 reads as scaling")
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "  the turn speed put back")
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
