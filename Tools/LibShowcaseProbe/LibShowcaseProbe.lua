@@ -672,18 +672,31 @@ local function TargetState()
     return line
 end
 
+-- What a trial needs, checked as it starts: a hard target and the UI shown.
+-- A throw keeps the step (Retry), so no answer is saved for a trial that
+-- didn't happen (Codex, PR #50).
+local function NeedHardTarget()
+    if not (G("UnitExists") and UnitExists("target")) then error("no target: click an NPC or player, then Retry", 0) end
+    if G("IsTargetLoose") and IsTargetLoose() then error("a soft target: click it to make it a hard one, then Retry", 0) end
+    if not UIParent:IsShown() then error("the UI is hidden: Alt+Z, then Retry", 0) end
+end
+
 Probe:Steps("sound", {
     title = "The target-lost click when the UI hides",
-    { text = "Out of combat, with the game sound on. Target a nearby NPC or player (a hard target: click it), then press Next.",
-      check = function() return G("UnitExists") and UnitExists("target") and true or false, "a target selected" end },
+    { text = "Out of combat, with the game sound on. Target a nearby NPC or player (a hard target: click it), then press Ready.",
+      button = "Ready", run = function() NeedHardTarget(); return TargetState() end },
     { text = "The control: press Alt+Z (the UI hides), listen, then Alt+Z again. Did you hear the target-lost click when the UI hid?",
       ask = true },
     { text = "Open starts the presentation: the UI hides. Listen.", button = "Open", run = function()
-          local before = TargetState()
           if window and window:IsShown() then window:Hide() end
+          NeedHardTarget()
+          local before = TargetState()
           Show()
-          local ok = SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden()
-          return ok, before
+          if not (SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden()) then
+              if window and window:IsShown() then window:Hide() end
+              error("the presentation did not hide the UI (another showcase, or a dialog up): fix it, then Retry", 0)
+          end
+          return true, before
       end },
     { text = "Did you hear the target-lost click when the presentation hid the UI?", ask = true },
     { text = "Close ends the presentation.", button = "Close", run = function()
