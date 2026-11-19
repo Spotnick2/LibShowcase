@@ -557,7 +557,7 @@ fp("steps ls tempcvar")
 rec = record("tempcvar")
 eq(rec.at, 1, "tempcvar 1: refused in gamepad mode")
 check(logHas("gamepad mode is on: use the mouse and keyboard"), "  saying why")
-eq(DB.temp and DB.temp.orig, nil, "  nothing saved as the start values")
+eq(DB.temp and DB.temp.pending, nil, "  nothing saved as the start values")
 style = 0
 S.Run()
 expectedErrors = expectedErrors + (#errors - errs3)
@@ -587,7 +587,7 @@ eq(rec.at, 15, "tempcvar 15: the /reload")
 S.Next()
 eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "tempcvar 17: put back as at the start")
 eq(rec.status, "done", "the tempcvar procedure finishes")
-eq(DB.temp.orig, nil, "  its start values cleared once put back")
+eq(DB.temp.pending, nil, "  its start values cleared once put back")
 
 -- Stopped after Base (Codex, PR #52): the start values stay, a new run keeps
 -- them, and /fp ls tempback puts them back.
@@ -596,16 +596,36 @@ rec = record("tempcvar")
 S.Run()
 eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "01", "a new run's Base written")
 fp("steps stop")
-eq(DB.temp.orig.CameraKeepCharacterCentered .. DB.temp.orig.CameraReduceUnexpectedMovement, "10", "stopped: the start values kept")
+eq(DB.temp.pending.CameraKeepCharacterCentered .. DB.temp.pending.CameraReduceUnexpectedMovement, "10", "stopped: the start values kept")
 fp("steps ls tempcvar")
 check(logHas("keeping an earlier run's start values"), "a new run keeps them")
-eq(DB.temp.orig.CameraKeepCharacterCentered .. DB.temp.orig.CameraReduceUnexpectedMovement, "10", "  not the Base write's")
+eq(DB.temp.pending.CameraKeepCharacterCentered .. DB.temp.pending.CameraReduceUnexpectedMovement, "10", "  not the Base write's")
 fp("steps stop")
+-- In gamepad mode the put-back is refused: removing the temps would take
+-- Blizzard's own away (Codex, PR #52).
+local errs4 = #errors
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return 1 end })
+fp("ls tempback")
+check(logHas("tempback: gamepad mode is on"), "/fp ls tempback refuses in gamepad mode")
+check(DB.temp.pending ~= nil, "  and keeps the start values")
+rawset(_G, "C_InputInterfaceStyle", nil)
+expectedErrors = expectedErrors + (#errors - errs4)
 fp("ls tempback")
 eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "/fp ls tempback puts them back")
-eq(DB.temp.orig, nil, "  and clears them")
+eq(DB.temp.pending, nil, "  and clears them")
 fp("ls tempback")
 check(logHas("tempback: nothing to put back"), "  a second time, nothing to do")
+-- The older probe's `orig`, left even by a finished run, is never trusted:
+-- a new run drops it and records its own start values (Codex, PR #52).
+DB.temp.orig = { CameraKeepCharacterCentered = "0", CameraReduceUnexpectedMovement = "1" }
+fp("ls tempback")
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "tempback ignores the older probe's orig")
+fp("steps ls tempcvar")
+check(logHas("dropped an older probe's start values"), "a new run drops it")
+eq(DB.temp.orig, nil, "  gone")
+eq(DB.temp.pending.CameraKeepCharacterCentered .. DB.temp.pending.CameraReduceUnexpectedMovement, "10", "  its own start values recorded")
+fp("steps stop")
+fp("ls tempback")
 rawset(_G, "C_CVar", hadCVar)
 
 ------------------------------------------------------------------------------

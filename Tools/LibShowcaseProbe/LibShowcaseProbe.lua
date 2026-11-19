@@ -1053,15 +1053,20 @@ local function TempStart()
     -- A temp already on would be taken for the stored value, and the Base
     -- write would replace the real one unseen (Codex, PR #52).
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
-    -- The start values stay until a verified put-back clears them: a run
-    -- stopped after Base keeps the player's real ones for the next run, or
-    -- for /fp ls tempback (Codex, PR #52).
+    -- The start values (`pending`) stay until a verified put-back clears
+    -- them: a run stopped after Base keeps the player's real ones for the
+    -- next run, or for /fp ls tempback (Codex, PR #52). `orig` is the older
+    -- probe's key, left behind even by a finished run: never trusted.
     local db = TempDB()
-    if type(db.orig) == "table" then
+    if db.orig ~= nil then
+        db.orig = nil
+        say("  dropped an older probe's start values (they may be from a finished run)")
+    end
+    if type(db.pending) == "table" then
         say("  keeping an earlier run's start values (its put-back never ran): /fp ls tempback restores them")
     else
-        db.orig = {}
-        for _, cvar in ipairs(TEMP_CVARS) do db.orig[cvar] = GetCVar(cvar) end
+        db.pending = {}
+        for _, cvar in ipairs(TEMP_CVARS) do db.pending[cvar] = GetCVar(cvar) end
     end
     local pad = G("C_GamePad") and C_GamePad.IsEnabled
     local okPad, enabled = false, nil
@@ -1098,10 +1103,12 @@ local function TempDo(what)
 end
 
 -- Everything back as it was when the procedure started, read back: a
--- mismatch throws (the step stays, Retry).
+-- mismatch throws (the step stays, Retry). Not in gamepad mode: removing the
+-- temps would take Blizzard's own away (Codex, PR #52).
 local function TempPutBack()
-    local orig = TempDB().orig
+    local orig = TempDB().pending
     if type(orig) ~= "table" then error("no start values saved", 0) end
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local wrong = {}
     for _, cvar in ipairs(TEMP_CVARS) do
         local remove = TempApi("RemoveTempCVar")
@@ -1115,7 +1122,7 @@ local function TempPutBack()
     end
     local line = TempRead("put back")
     if #wrong > 0 then error("not put back: " .. table.concat(wrong, "; ") .. ". Retry", 0) end
-    TempDB().orig = nil
+    TempDB().pending = nil
     return true, line
 end
 
@@ -1157,7 +1164,7 @@ Probe:Steps("tempcvar", {
 
 -- After a tempcvar run that was stopped before its last step.
 Probe:Command("tempback", function()
-    if type(TempDB().orig) ~= "table" then say("tempback: nothing to put back"); return end
+    if type(TempDB().pending) ~= "table" then say("tempback: nothing to put back"); return end
     local ok, a, b = pcall(TempPutBack)   -- ok, true, line; or false, the error
     say("tempback: " .. tostring(ok and b or a))
 end, "put the centring CVars back after a stopped tempcvar run")
