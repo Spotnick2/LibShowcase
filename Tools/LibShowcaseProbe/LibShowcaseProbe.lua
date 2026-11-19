@@ -689,18 +689,49 @@ local function NeedHardTarget()
     if not UIParent:IsShown() then error("the UI is hidden: Alt+Z, then Retry", 0) end
 end
 
+-- The Alt+Z control, observed (Codex, PR #50): a post-hook on SetUIVisibility
+-- (installed at load; the library's own hook sees the player's Alt+Z the
+-- same way) records the hide, with whether a hard target was there at that
+-- moment, then the show. Only a hide with a hard target, then a show, counts.
+local soundCtl = {}
+local function SoundControlHook(shown)
+    if not soundCtl.armed or soundCtl.done then return end
+    if not shown and not UIParent:IsShown() then
+        local hard = G("UnitExists") and UnitExists("target") and not (G("IsTargetLoose") and IsTargetLoose())
+        soundCtl.hid = hard and true or false
+        say("  control: the UI hid, hard target " .. tostring(soundCtl.hid))
+    elseif shown and UIParent:IsShown() and soundCtl.hid ~= nil then
+        if soundCtl.hid then
+            soundCtl.done = true
+            say("  control: the UI came back; the control ran")
+        else
+            soundCtl.hid = nil
+            say("  control: no hard target when the UI hid: target one, then Alt+Z twice again")
+        end
+    end
+end
+local function SoundControlWait()
+    if soundCtl.done then return true, "Alt+Z hid the UI with a hard target, then showed it" end
+    if soundCtl.hid == nil then return false, "waiting for Alt+Z (the hide), with a hard target" end
+    return false, "waiting for Alt+Z again (the show)"
+end
+
 Probe:Steps("sound", {
     title = "The target-lost click when the UI hides",
     { text = "Out of combat, with the game sound on. Target a nearby NPC or player (a hard target: click it), then press Ready.",
-      button = "Ready", run = function() NeedHardTarget(); return TargetState() end },
-    { text = "The control: press Alt+Z (the UI hides), listen, then Alt+Z again. Did you hear the target-lost click when the UI hid?",
-      ask = true },
+      button = "Ready", run = function() NeedHardTarget(); soundCtl = { armed = true }; return TargetState() end },
+    { text = "The control: press Alt+Z (the UI hides), listen, then Alt+Z again. This step completes once both were seen.",
+      timeout = 600, wait = SoundControlWait },
+    -- The answer counts only for a control that ran (a timed-out wait goes on as a FAIL).
+    { text = "Did you hear the target-lost click when Alt+Z hid the UI?", ask = true,
+      check = function() return soundCtl.done == true, "the control ran" end },
     { text = "Open starts the presentation: the UI hides. Listen.", button = "Open", run = function()
           if window and window:IsShown() then window:Hide() end
           NeedHardTarget()
           local before = TargetState()
           Show()
-          if not (SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden()) then
+          -- The engine's UI, not only the library's flag (Codex, PR #50).
+          if not (SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden() and not UIParent:IsShown()) then
               if window and window:IsShown() then window:Hide() end
               error("the presentation did not hide the UI (another showcase, or a dialog up): fix it, then Retry", 0)
           end
@@ -1181,6 +1212,8 @@ ev:SetScript("OnEvent", function(_, event, a1)
                 if reason == "ui-shown" and window then window:Hide() end
             end,
         })
+        -- The sound procedure's Alt+Z control; a post-hook leaves the call secure.
+        hooksecurefunc("SetUIVisibility", function(shown) SoundControlHook(shown) end)
         hooksecurefunc("StaticPopup_Show", function(which)
             say("StaticPopup_Show " .. tostring(which))
             C_Timer.After(0, function() DialogTaint(tostring(which)) end)

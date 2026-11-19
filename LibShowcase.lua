@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 8
+local MAJOR, MINOR = "LibShowcase-1.0", 9
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -263,15 +263,22 @@ end
 -- Small helpers
 --------------------------------------------------------------------------------
 
-local function InCombat()
+-- The lockdown itself: what blocks SetUIVisibility from addon code and a
+-- protected frame's SetParent (MEASURED 70959, docs/DESIGN.md "Combat").
+local function Locked()
     return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
 end
 
--- The lockdown itself: what blocks SetUIVisibility from addon code (MEASURED
--- 70959, docs/DESIGN.md "Combat"). Kept apart from InCombat, which may come
--- to mean "combat has started" (#21) while SetUIVisibility still works.
-local function Locked()
-    return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
+-- Combat has started: the lockdown, or the client's own combat flag. MEASURED
+-- 70959 (/fp steps ls combat, run #466): inside PLAYER_REGEN_DISABLED,
+-- InCombatLockdown() is still false but UnitAffectingCombat("player") is
+-- already true. So a consumer's handler that runs after the library's (the
+-- order is not ours) is refused too (#21). It refuses new work (Enter,
+-- HideGameUI, a protected Lift); the library's own restore in that handler
+-- still runs, unlocked, on Locked().
+local function InCombat()
+    if Locked() then return true end
+    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
 end
 
 local function IsProtectedFrame(f)
@@ -420,7 +427,7 @@ end
 -- back in here.
 function I.DropRecord(rec)
     local frame = rec.frame
-    if InCombat() and IsProtectedFrame(frame) then
+    if Locked() and IsProtectedFrame(frame) then
         rec.deferred = true
         return false
     end

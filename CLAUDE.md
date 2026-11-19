@@ -122,7 +122,8 @@ repo has no CI.
 - `tests\wow_stubs.lua`: this library's part of the mock, every stubbed global confirmed in the
   API dump: camera, CVars, `SetUIVisibility` (blocked from addon code in combat, MEASURED 70959;
   `WoW.playerSetUIVisibility` is the player's own Alt+Z / Escape), the StaticPopup pool, `WoW.enterCombat` /
-  `leaveCombat`, `SetParent` refused on a protected frame in combat; every global camera call
+  `leaveCombat` (`UnitAffectingCombat("player")` already true inside `PLAYER_REGEN_DISABLED`, the
+  lockdown after it, MEASURED 70959), `SetParent` refused on a protected frame in combat; every global camera call
   logged in order (`WoW.calls`). Strict globals, widgets, events (checked against the build),
   timers and combat lockdown (`WoW.combat`) are the kit's.
 - `tests\harness.lua` loads the library **through the XML's order**; `ticks(dt, n)` runs `n`
