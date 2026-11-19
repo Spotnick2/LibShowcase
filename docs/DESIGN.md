@@ -277,7 +277,7 @@ were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
 | Question | Procedure |
 |---|---|
-| Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/fp steps ls pitch` |
+| Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert. 70959, 2026-11-19: one write that cleared centring **and** set it to 1 raised the view once, at the write: the character lower on screen, more above it in view; nothing followed the movement. Which of the writes did it is open, and whether it follows the zoom, as Retail's does) | `/fp steps ls pitch` (one write at a time, a screenshot after each) |
 | Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/fp steps ls nudge` (without, then with) |
 | `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/fp steps ls combat` |
 | The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/fp steps ls prompts` (a ready check or a loot roll waiting, then answered) |

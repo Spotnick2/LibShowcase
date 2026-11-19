@@ -7,8 +7,8 @@
 --
 -- Guided procedures (/fp steps ls <name>), each a panel of buttons that saves
 -- every outcome:
---   pitch     test_cameraDynamicPitch with centring cleared: does the camera
---             tilt with movement?
+--   pitch     centring cleared, then test_cameraDynamicPitch 1, a screenshot
+--             after each: which write moves the view, and does it follow the zoom?
 --   nudge     the shoulder offset written without, then with, Narcissus's
 --             CameraZoomIn(0) nudge: does the character move at once?
 --   combat    SetUIVisibility(false) then (true) once InCombatLockdown() is
@@ -25,7 +25,7 @@
 --             the player types the /console line
 --
 -- Commands (/fp ls <command>), for a one-off:
---   pitch [off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
+--   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
 --   names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus |
 --   next | restore | clear
 -- Always on: every StaticPopup_Show logs, a frame later, whether each shown
@@ -105,14 +105,22 @@ end
 local blockedAtStart = 0
 local function MarkBlocked() blockedAtStart = #blockedSeen; return blockedAtStart end
 
--- 1. Dynamic pitch, with the centring CVars that cancelled the shoulder offset cleared.
+-- 1. Dynamic pitch, with the centring CVars that cancelled the shoulder offset
+-- cleared. "Pitch" is the camera's up/down angle. On 70959 (2026-11-19) one
+-- Write that cleared centring AND set dynamic pitch 1 raised the view once,
+-- at the write (the character lower on screen, more above it in view);
+-- nothing followed the movement. Which write did it is what the procedure
+-- separates. `arg` "centring" clears centring only, "1" also sets dynamic
+-- pitch 1, "off" puts everything back.
+local PITCH_QUESTION = "Did the view change when you pressed Write (the camera angle going up or down,"
+    .. " the character moving on screen)? Note how, in the Note box."
 local function Pitch(arg)
     if arg == "off" then return RestoreAll() end
-    say("== pitch: build " .. build())
+    local only = arg == "centring"
+    say("== pitch " .. (only and "centring cleared only" or "dynamic pitch 1") .. ": build " .. build())
     ClearCentring()
-    local back = Set("test_cameraDynamicPitch", "1")
-    say("  now walk forward and backward. Does the camera tilt (pitch) with movement?")
-    return back
+    if only then return GetCVar("test_cameraDynamicPitch") end
+    return Set("test_cameraDynamicPitch", "1")
 end
 
 -- 2. Is Narcissus's CameraZoomIn(0) nudge needed for the offset to apply?
@@ -464,8 +472,8 @@ end
 -- Commands
 ----------------------------------------------------------------------------
 
-Probe:Command("pitch", function(args) Pitch(args) end, "[off]: test_cameraDynamicPitch with centring cleared")
-Probe:Command("nudge", function(args) Nudge(args) end, "0|1: the shoulder offset without / with the CameraZoomIn(0) nudge")
+Probe:Command("pitch", function(args) Pitch(args) end, "[centring or off]: centring cleared and test_cameraDynamicPitch 1 (centring: that only); off puts it back")
+Probe:Command("nudge", function(args) Nudge(args) end, "0 or 1: the shoulder offset without / with the CameraZoomIn(0) nudge")
 Probe:Command("combat", function() Combat() end, "arm: SetUIVisibility off and on once the next combat's lockdown is on")
 Probe:Command("invite", function() Invite() end, "open the presentation for a friend's party or guild invite")
 Probe:Command("show", function(args)
@@ -479,9 +487,9 @@ Probe:Command("show", function(args)
 end, "[N]: the presentation on a small window (again to close); after N seconds")
 Probe:Command("taint", function() Taint() end, "tainted fields of GameTooltip, the chat edit boxes, the chat globals")
 Probe:Command("prompts", function() Prompts() end, "every return of the prompt getters the library asks")
-Probe:Command("names", function(args) Names(args) end, "[ui|list]: hideWorldNames; again to close")
+Probe:Command("names", function(args) Names(args) end, "[ui or list]: hideWorldNames; again to close")
 Probe:Command("testcvar", function() TestCVar() end, "write test_cameraOverShoulder from addon code")
-Probe:Command("rereg", function(args) Rereg(args) end, "closure|direct|none: re-register the popup handler")
+Probe:Command("rereg", function(args) Rereg(args) end, "closure, direct or none: re-register the popup handler")
 Probe:Command("dialogs", function() DialogTaint("now") end, "whether each shown dialog's `which` was written securely")
 Probe:Command("focus", function() Focus() end, "3 s later: the frame under the mouse, its tainted fields")
 Probe:Command("next", function() Next() end, "the /console line to type (a changing value)")
@@ -516,10 +524,21 @@ end
 
 Probe:Steps("pitch", {
     title = "Dynamic pitch with centring cleared",
-    { text = "Stand somewhere open, out of combat. Write clears the centring CVars and sets test_cameraDynamicPitch 1.",
-      button = "Write", run = function() return Pitch() end },
-    { text = "Walk forward, then backward. Does the camera tilt (pitch) with the movement?", ask = true },
-    { text = "Putting every CVar the probe touched back.", auto = true, run = RestoreAll },
+    -- One write at a time, a screenshot after each: centring cleared alone
+    -- (dynamic pitch untouched), then dynamic pitch 1. Retail's dynamic pitch
+    -- follows the zoom distance (unmeasured here), so step 6 zooms.
+    { text = "Stand somewhere open, out of combat, at your usual zoom. Don't touch the mouse until step 6. Next takes a screenshot of the view as it is.",
+      screenshot = "pitch: before" },
+    { text = "Write clears the centring CVars only (dynamic pitch untouched).",
+      button = "Write", screenshot = "pitch: centring cleared", run = function() return Pitch("centring") end },
+    { text = PITCH_QUESTION, ask = true },
+    { text = "Write sets test_cameraDynamicPitch 1, the centring still cleared.",
+      button = "Write", screenshot = "pitch: dynamic pitch 1", run = function() return Pitch("1") end },
+    { text = PITCH_QUESTION, ask = true },
+    { text = "Zoom far out, then back in, with the mouse wheel. Does the camera angle change with the zoom more than it usually does?",
+      ask = true },
+    { text = "Putting every CVar the probe touched back.", auto = true, screenshot = "pitch: restored", run = RestoreAll },
+    { text = "Did the view go back to how it was before step 2?", ask = true },
 })
 
 Probe:Steps("nudge", {

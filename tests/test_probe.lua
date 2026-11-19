@@ -181,10 +181,25 @@ check(logHas("ADDON_ACTION_BLOCKED: LibShowcaseProbe SomeProtected()"), "a block
 fp("steps ls pitch")
 local rec = record("pitch")
 check(rec and rec.status == "active", "/fp steps ls pitch starts it")
-S.Run()
-eq(WoW.cvars.test_cameraDynamicPitch, "1", "pitch 1: written")
+S.Next(); shoot()
+eq(shots, 1, "pitch 1: a screenshot of the view before")
+S.Run(); shoot()
+eq(WoW.cvars.CameraKeepCharacterCentered, "0", "pitch 2: centring cleared")
+eq(WoW.cvars.test_cameraDynamicPitch, "0", "  dynamic pitch untouched")
+eq(shots, 2, "  a screenshot after the write")
+S.Answer(true)
+S.Run(); shoot()
+eq(WoW.cvars.test_cameraDynamicPitch, "1", "pitch 4: dynamic pitch 1")
+eq(shots, 3, "  a screenshot after it")
 S.Answer(false)
-eq(WoW.cvars.test_cameraDynamicPitch, "0", "pitch 3: put back on arrival")
+S.Answer(true)
+shoot()
+eq(WoW.cvars.test_cameraDynamicPitch, "0", "pitch 7: put back")
+eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  centring too")
+eq(shots, 4, "  a screenshot of the view restored")
+S.Answer(true)
+eq(rec.results[3].status .. "," .. rec.results[5].status .. "," .. rec.results[6].status, "yes,no,yes", "  every answer saved")
+shots = 0   -- the procedures below count their own
 eq(rec.status, "done", "the pitch procedure finishes")
 
 fp("steps ls nudge")
@@ -322,6 +337,11 @@ eq(rec.status, "done", "the rereg procedure finishes")
 eq(logCount("ERROR"), expectedErrors, "no command or step logged an error but the names refusal")
 eq(#errors, expectedErrors, "nothing else reached the error handler" .. (errors[2] and (": " .. errors[2]) or ""))
 eq(#WoW.chat, 0, "nothing went to chat" .. (WoW.chat[1] and (": " .. WoW.chat[1]) or ""))
+-- The client reads "|x" as an escape and drops it (GlassChat #55): no line
+-- the probe saved has a stray one (its help lines included).
+local stray
+for _, l in ipairs(DB.log) do if WoW.StrayPipe(l) then stray = stray or l end end
+eq(stray, nil, "no stray | in any saved line")
 local log = DB.log
 fp("ls clear")
 check(DB.log == log, "clear empties the saved log in place")
