@@ -41,39 +41,10 @@ local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 -- protected one in combat: the old stub refused it, and so does this one.
 WoW.PROTECTED.SetParent = true
 
--- WowTestKit #99: the core's SetParent neither moves the frame level nor
--- fires OnShow / OnHide. This one does both, as the old stub did:
--- - the level goes to just above the new parent's, as the client does for a
---   frame without a fixed level. The mutation run relies on it: a drop that
---   didn't put the recorded level back would otherwise pass ("level not
---   restored", tests/mutate.lua).
--- - test_lease relies on the scripts: a lifted frame put back under a hidden
---   UIParent gets its OnHide half way through the drop, which may drop it
---   again (LibShowcase.lua, I.DropRecord). The core's SetParent runs first
---   (it takes the subtree's visibility as reported); the scripts then fire
---   where it changed, parents first.
--- REMOVE THIS OVERRIDE IN THE SAME CHANGE that moves tests/kit.pin past the
--- kit's fix (Spotnick2/WowTestKit#100): with both, every OnShow / OnHide
--- fires twice (test_lease's "fired the frame's OnHide" goes red), and the
--- kit measured a parentless frame's level as 0, where this gives 1.
-local coreSetParent = Methods.SetParent
-local function reported(w, list)
-    list[#list + 1] = { w, w._vis }
-    for _, c in ipairs(w._children or {}) do reported(c, list) end
-    return list
-end
-function Methods.SetParent(w, p)
-    local before = reported(w, {})
-    coreSetParent(w, p)
-    w._level = (p and p._level or 0) + 1
-    for _, e in ipairs(before) do
-        local node, was = e[1], e[2]
-        if node._vis ~= was then
-            local script = node._scripts[node._vis and "OnShow" or "OnHide"]
-            if script then script(node) end
-        end
-    end
-end
+-- The core's SetParent is the client's, measured on 70959 (WowTestKit #99):
+-- OnShow / OnHide where the move changes visibility, and the level just above
+-- the new parent's (0 with none). test_lease's re-entrant drop and the
+-- mutation "level not restored" rely on both.
 
 -- A subtree's visibility taken as reported, without its scripts: what
 -- SetUIVisibility does to UIParent here, as the old stub did.

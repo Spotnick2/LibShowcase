@@ -89,6 +89,13 @@ owner.
   and is put back at `PLAYER_REGEN_ENABLED`, the record cleared only after the reparent succeeded.
   The library never hides a protected frame; `onForcedExit` lets the consumer close its window.
   Enter refuses in combat, and so does lifting a protected frame.
+- **A drop is re-entrant.** Putting a frame back under a hidden `UIParent` fires its `OnHide`
+  during the `SetParent` call, which may drop it again, so a record leaves the list before
+  anything moves. Reparenting also sets the frame level (the new parent's + 1, 0 with no
+  parent), so a drop puts the recorded level back after the parent. MEASURED 70959 by
+  WowTestKit's probe (`/fp steps tk reparent`, WowTestKit #99): `OnShow` / `OnHide` fire on a
+  visibility change only, children first, under an Alt+Z-hidden `UIParent` too; the level rule
+  held raised and lowered, children one above.
 - **Escape/Alt+Z** with the UI hidden: a `hooksecurefunc("SetUIVisibility")` hook calls
   `onForcedExit("ui-shown")`; if the consumer does not exit, the library does.
 - **Logout, loading screens:** `PLAYER_LOGOUT` and `PLAYER_ENTERING_WORLD` restore everything.

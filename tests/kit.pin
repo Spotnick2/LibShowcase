@@ -2,6 +2,6 @@
 # build: the newest the kit has data for. LibShowcase records no measured build
 # of its own (docs/DESIGN.md's MEASURED notes name 70205 and later; the old
 # stub read the 70338 dump, which the kit has no data for).
-sha=38c8a6c58a8caaf3b4cee41424e6e43502102a45
+sha=38188ef92077c7c97a819e860b9dea401278ad6f
 build=70959
 api=2
