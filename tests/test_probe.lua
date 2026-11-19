@@ -656,7 +656,7 @@ eq(rec.at, 2, "release 2: waits for the camera to settle (Codex, PR #58)")
 S.Poll()
 eq(rec.at, 2, "  still waiting mid-entry, so no screenshot yet")
 eq(shots, shots0, "  none taken")
-ticks(0.1, 20); S.Poll(); shoot()
+ticks(0.1, 20); S.Poll(); shoot(); S.Poll()
 eq(shots, shots0 + 1, "  one once it settled")
 S.Answer(true)
 S.Run(); untilEnded()
@@ -672,7 +672,7 @@ check(not SC:IsActive(), "  and the presentation closed")
 WoW.cvars.cameraYawMoveSpeed = "300"
 fp("steps ls release")
 rec = record("release")
-S.Run(); ticks(0.1, 20); S.Poll(); shoot(); S.Answer(true); S.Run(); untilEnded()
+S.Run(); ticks(0.1, 20); S.Poll(); shoot(); S.Poll(); S.Answer(true); S.Run(); untilEnded()
 S.Run()
 eq(WoW.cvars.cameraYawMoveSpeed, "150", "release 6: a fast setting is halved, so the change is always twice")
 S.Answer(true)
@@ -708,10 +708,19 @@ S.Next()   -- Done, 30 s in
 check(tostring(rec.results[15].detail):find("not measured: the wait was cut short", 1, true), "release 15: Done at 30 s: not measured")
 eq(rec.results[15].check, "FAIL", "  saved as such")
 -- The cut-short trial disarmed the countdown: Back to Open arms a new one.
+-- While that first countdown is still open, Open can't hide the UI, so it
+-- refuses (Codex, PR #58); once it is cancelled, Open hides it.
 S.Back(); S.Back(); S.Back()
 eq(rec.at, 13, "  Back to Open")
+local errs5 = #errors
 S.Run()
+eq(rec.at, 13, "release 13: the UI kept up by the open countdown, Open refuses")
+expectedErrors = expectedErrors + (#errors - errs5)
+WoW.fire("CANCEL_PLAYER_COUNTDOWN", "Player-1-00000001", true)
+S.Run()
+check(SC:IsGameUIHidden() and not UIParent:IsShown(), "release 13: Open hides the UI")
 WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 90, 90, true, "Leader")
+check(logHas("it brought the UI back true"), "  and this countdown brought it back")
 WoW.advance(62)
 S.Poll()
 eq(rec.results[15].check, "PASS", "release 15: HideGameUI 61 s into a 90 s countdown is refused")
@@ -735,6 +744,27 @@ WoW.gamepadMode(false)
 S.Run()
 eq(rec.status, "done", "the release procedure finishes")
 eq(rec.results[22].check, "PASS", "release 22: the centring CVars as before")
+-- Done pressed mid-entry takes no framing shot (Codex, PR #58).
+WoW.advance(5)
+fp("steps ls release")
+rec = record("release")
+local shots1 = shots
+S.Run(); S.Next(); shoot()
+eq(shots, shots1, "release 2: Done mid-entry takes no screenshot")
+fp("steps stop")
+win:Hide(); ticks(0.1, 20); WoW.flushTimers()
+-- A new run can't pass on the last run's measurements (Codex, PR #58): every
+-- part skipped, its verdicts read "not measured".
+WoW.advance(5)
+fp("steps ls release")
+rec = record("release")
+for _ = 1, 20 do S.Skip() end
+eq(rec.at, 22, "a second release run, every part skipped")
+S.Run()
+eq(rec.results[22].check, "FAIL", "  the gamepad comparison is not measured")
+check(tostring(rec.results[22].checkDetail):find("not measured", 1, true), "  and says so")
+eq(rec.results[15].check, "FAIL", "  nor the countdown")
+check(tostring(rec.results[15].detail):find("not measured", 1, true), "  which says so")
 rawset(_G, "C_InputInterfaceStyle", nil)
 WoW.sex = 2
 
@@ -761,6 +791,21 @@ WoW.advance(10); S.Run()
 eq(rec.status, "done", "the orbitspeed procedure finishes")
 check(tostring(rec.results[5].detail):find("ratio 4.00: scales", 1, true), "orbitspeed 5: a ratio of 4 reads as scaling")
 eq(WoW.cvars.cameraYawMoveSpeed, "180", "  the turn speed put back")
+-- Between the turns the player's turn speed is back (Codex, PR #58).
+WoW.advance(5)
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+S.Run(); WoW.advance(40); S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "orbitspeed 2: the turn speed back between the turns")
+fp("steps stop")
+-- A new run with its turns skipped doesn't reuse the last run's timings.
+WoW.advance(5)
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+for _ = 1, 4 do S.Skip() end
+eq(rec.status, "done", "an orbitspeed run with both turns skipped")
+check(tostring(rec.results[5].detail):find("not measured: both turns must be timed in this run", 1, true),
+      "  is not measured, whatever an earlier run timed")
 
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
