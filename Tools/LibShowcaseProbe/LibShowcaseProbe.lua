@@ -584,7 +584,7 @@ Probe:Steps("nudge", {
 
 Probe:Steps("combat", {
     title = "SetUIVisibility in a real lockdown",
-    { text = "Out of combat, near a mob. Arm, then pull it: once InCombatLockdown() is true the probe hides the UI and shows it again 0.5 s later.",
+    { text = "Out of combat, near a mob. Arm, then pull it: once InCombatLockdown() is true the probe tries to hide the UI, then show it 0.5 s later. MEASURED 70959: both calls are blocked, so the UI is expected to stay as it is (Bugsy reports each block).",
       button = "Arm", run = Combat },
     -- "no lockdown" (the poll gave up after 10 s) ends the wait too, as a FAIL.
     { text = "Pull the mob and keep fighting. This step completes once both calls have run.", timeout = 300,
@@ -595,7 +595,7 @@ Probe:Steps("combat", {
           return false, "combat check: " .. tostring(combat.state)
       end,
       check = function() return combat.state == "done", combat.state end },
-    { text = "Did the UI disappear and come back during the fight?", ask = true },
+    { text = "Did the UI disappear during the fight? (Expected: no, the calls are blocked.)", ask = true },
     { text = "The blocked actions the test raised.", auto = true, run = BlockedReport },
 })
 
