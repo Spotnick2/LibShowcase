@@ -358,6 +358,29 @@ eq(rec.at, 8, "rereg 8: the /reload (the CVar put back on 7)")
 S.Next()
 eq(rec.status, "done", "the rereg procedure finishes")
 
+-- #41: the target-lost click. UnitExists and IsTargetLoose are in the 70959 dump.
+rawset(_G, "UnitExists", function(unit) return unit == "target" end)
+rawset(_G, "IsTargetLoose", function() return false end)
+fp("steps ls sound")
+rec = record("sound")
+S.Next()
+eq(rec.results[1].check, "PASS", "sound 1: a target selected")
+S.Answer(false)
+S.Run()
+check(SC:IsActive() and SC:IsGameUIHidden(), "sound 3: presenting, the UI hidden")
+check(tostring(rec.results[3].detail):find("target exists true, IsTargetLoose false, UI shown true", 1, true),
+      "  the target read before the hide")
+S.Answer(true)
+S.Run()
+ticks(0.1, 20)
+WoW.flushTimers()
+S.Poll()
+check(tostring(rec.results[6].detail):find("the presentation ended", 1, true), "sound 6: the presentation ended")
+S.Answer(true)
+eq(rec.status, "done", "the sound procedure finishes")
+check(tostring(rec.results[8].detail):find("target exists true", 1, true), "  reading the target again")
+eq(rec.results[4].status, "yes", "  the answers saved")
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------

@@ -302,7 +302,9 @@ console and `LibShowcaseProbeDB.log`; each procedure's record is in `ForeverProb
 (`steps.records["LibShowcaseProbe/<name>"]`). The MEASURED notes above name the commands as they
 were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
-None is open.
+| Question | Procedure |
+|---|---|
+| Hiding the UI with a target selected: does the "target lost" click play? Forever loads the Mainline `TargetFrame`, whose `OnHide` plays `INTERFACE_SOUND_LOST_TARGET_UNIT` (#41) | `/fp steps ls sound` (Alt+Z first, the control) |
 
 Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the prompt
 getters and the dungeon-invite role prompt, `SetUIVisibility` in a lockdown (above), and the

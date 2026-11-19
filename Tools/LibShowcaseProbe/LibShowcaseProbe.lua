@@ -23,6 +23,9 @@
 --   rereg     the experimental-CVar popup with its handler left unregistered,
 --             re-registered with Blizzard's own function, and with a closure;
 --             the player types the /console line
+--   sound     hiding the UI with a target selected: does the "target lost"
+--             click play (#41)? Alt+Z first (the control), then the library's
+--             own hide
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -653,6 +656,43 @@ Probe:Steps("names", {
     { text = "Type /reload, to see what survives it.", reload = true },
     { text = "Reading the name CVars after the /reload.", auto = true,
       run = function() return NamesRead("reload") end, check = NamesVerdict },
+})
+
+-- 11. #41: does hiding the UI with a target play the "target lost" click?
+-- Forever loads the Mainline TargetFrame, whose OnHide plays
+-- SOUNDKIT.INTERFACE_SOUND_LOST_TARGET_UNIT unless the target is a soft one
+-- (wow-ui-source forever, Blizzard_UnitFrame/Mainline/TargetFrame.lua);
+-- SetUIVisibility(false) hides it with UIParent. Unmeasured.
+local function TargetState()
+    local exists = G("UnitExists") and UnitExists("target")
+    local loose = G("IsTargetLoose") and IsTargetLoose()
+    local line = ("target exists %s, IsTargetLoose %s, UI shown %s"):format(tostring(exists), tostring(loose),
+        tostring(UIParent:IsShown()))
+    say("  " .. line)
+    return line
+end
+
+Probe:Steps("sound", {
+    title = "The target-lost click when the UI hides",
+    { text = "Out of combat, with the game sound on. Target a nearby NPC or player (a hard target: click it), then press Next.",
+      check = function() return G("UnitExists") and UnitExists("target") and true or false, "a target selected" end },
+    { text = "The control: press Alt+Z (the UI hides), listen, then Alt+Z again. Did you hear the target-lost click when the UI hid?",
+      ask = true },
+    { text = "Open starts the presentation: the UI hides. Listen.", button = "Open", run = function()
+          local before = TargetState()
+          if window and window:IsShown() then window:Hide() end
+          Show()
+          local ok = SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden()
+          return ok, before
+      end },
+    { text = "Did you hear the target-lost click when the presentation hid the UI?", ask = true },
+    { text = "Close ends the presentation.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return "closing"
+      end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Is your target still selected?", ask = true },
+    { text = "Reading the target again.", auto = true, run = TargetState },
 })
 
 Probe:Steps("rereg", {
