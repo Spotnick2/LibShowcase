@@ -84,7 +84,7 @@ owner.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)
-  restores the UI and the camera at once; a **protected** lifted frame keeps its record (parent,
+  restores the camera at once; a **protected** lifted frame keeps its record (parent,
   scale, strata, level; points recorded but not re-applied, so a drag made while lifted survives)
   and is put back at `PLAYER_REGEN_ENABLED`, the record cleared only after the reparent succeeded.
   The library never hides a protected frame; `onForcedExit` lets the consumer close its window.
@@ -92,8 +92,15 @@ owner.
   MEASURED 70959 (`/fp steps ls combat`, 2026-11-19): once `InCombatLockdown()` is true,
   `SetUIVisibility(false)` and `(true)` from addon code are **blocked** (`ADDON_ACTION_BLOCKED`, the
   `pcall` returns true, `UIParent` doesn't change). The player's own Alt+Z or Escape still works.
-  So the library can't hide or show the UI inside a lockdown: the "Escape mid-fight" restore
-  above relies on the player's own call having shown it (#42).
+  So the library never calls it there (MINOR 5, #42): `HideUI` refuses in combat, and a show due
+  inside a lockdown (a restore, a release, a dialog's reveal) is **owed**: the UI stays marked
+  hidden, the lease is held and the lifts stay up (a window put back under the still-hidden UI
+  would vanish), and `PLAYER_REGEN_ENABLED` shows the UI, drops the lifts and gives the lease back.
+  A reveal owed that way calls `onGameUIShown(reason)` then, when the UI is really back, not
+  before. The player's own Escape or Alt+Z in a lockdown does show the UI: the hook then only
+  follows it (no second call), and a `SetUIVisibility(true)` hook run that changed nothing (a
+  blocked call, `UIParent` still hidden) is not read as Escape. Getting the UI hidden into a
+  lockdown at all is #21.
 - **A drop is re-entrant.** Putting a frame back under a hidden `UIParent` fires its `OnHide`
   during the `SetParent` call, which may drop it again, so a record leaves the list before
   anything moves. Reparenting also sets the frame level (the new parent's + 1, 0 with no
