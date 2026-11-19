@@ -278,7 +278,10 @@ end
 -- still runs, unlocked, on Locked().
 local function InCombat()
     if Locked() then return true end
-    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true
+    -- rawget, as for every optional global: a consumer's strict mock without
+    -- it must not error (#56).
+    local affecting = rawget(_G, "UnitAffectingCombat")
+    return type(affecting) == "function" and affecting("player") == true
 end
 
 local function IsProtectedFrame(f)
@@ -1031,7 +1034,8 @@ function I.PlayerShoulderOffset(cfg, zoom)
         local _, raceFile, raceID = UnitRace("player")
         race = tonumber(raceID) or raceFile
     end
-    if type(UnitSex) == "function" then sex = UnitSex("player") end
+    local unitSex = rawget(_G, "UnitSex")   -- rawget: optional (#56)
+    if type(unitSex) == "function" then sex = unitSex("player") end
     return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult
 end
 

@@ -469,4 +469,23 @@ do
     eq(db.LibShowcaseCapture, nil, "  and is cleared")
 end
 
+------------------------------------------------------------------------------
+-- #56: a client (or a consumer's strict mock) without UnitAffectingCombat or
+-- UnitSex: the library reads them through rawget, so a presentation still
+-- enters (male framing, the lockdown alone for combat) and exits.
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    local SC = lib:New({ owner = "A" })
+    local affecting, sex = rawget(_G, "UnitAffectingCombat"), rawget(_G, "UnitSex")
+    rawset(_G, "UnitAffectingCombat", nil)
+    rawset(_G, "UnitSex", nil)
+    local ok, entered = pcall(SC.Enter, SC)
+    check(ok and entered, "without UnitAffectingCombat and UnitSex, Enter presents: " .. tostring(entered))
+    local okExit = pcall(SC.ForceRestore, SC)
+    check(okExit and not SC:IsActive(), "  and restores")
+    rawset(_G, "UnitAffectingCombat", affecting)
+    rawset(_G, "UnitSex", sex)
+end
+
 done("test_presentation")
