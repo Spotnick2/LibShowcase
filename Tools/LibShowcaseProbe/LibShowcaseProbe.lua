@@ -1187,13 +1187,34 @@ Probe:Command("tempback", function()
     say("tempback: " .. tostring(ok and b or a))
 end, "put the centring CVars back after a stopped tempcvar run")
 
--- 15. The r10 release check: what changed since r4 that only the client can
+-- 15. The release check: what changed since r4 that only the client can
 -- show. The female framing (#38), the orbit at another turn speed (#39), a
 -- combat start refusing a later handler's Enter (#21), a long countdown
 -- holding the UI up (#40), and a presentation in gamepad mode (#54). The
 -- countdown and gamepad parts need a group and a controller: Skip them
--- without.
+-- without. A verdict is a step's check, so the record shows it; a part that
+-- was skipped or cut short reads "not measured", and nothing it changed is
+-- left behind (Codex, PR #58).
 local rel = {}
+
+-- The turn speed a trial changes, and only that, put back: not RestoreAll,
+-- which restores every CVar the probe touched and runs pitchlimit.
+local yawSaved
+local function RestoreYaw()
+    local was = yawSaved
+    if was then pcall(SetCVar, "cameraYawMoveSpeed", was) end
+    yawSaved = nil
+    return was and ("cameraYawMoveSpeed back to " .. tostring(was)) or "the turn speed was not changed"
+end
+local function SetYaw(v)
+    if yawSaved == nil then yawSaved = GetCVar("cameraYawMoveSpeed") or false end
+    pcall(SetCVar, "cameraYawMoveSpeed", v)
+    local back = tonumber(GetCVar("cameraYawMoveSpeed"))
+    if back ~= tonumber(v) then
+        RestoreYaw()
+        error(("cameraYawMoveSpeed did not take %s (it reads %s): Retry"):format(tostring(v), tostring(back)), 0)
+    end
+end
 
 local function ReleaseFraming()
     local _, raceFile, raceID = UnitRace("player")
@@ -1204,8 +1225,36 @@ local function ReleaseFraming()
     return true, line
 end
 
+-- The entry turn is over (the library's camera mode is cleared): the framing
+-- the tester judges, and the screenshot, are the settled one.
+local function Settled()
+    local cam = type(lib().state) == "table" and lib().state.cam
+    if SC:IsActive() and type(cam) == "table" and cam.mode == nil then return true, "the camera settled" end
+    return false, "the camera is still moving in"
+end
+
+-- The orbit at another turn speed: half or double the current one, so the
+-- change is always twice, read back before the presentation opens.
+local function ReleaseOtherSpeed()
+    local v = tonumber(GetCVar("cameraYawMoveSpeed")) or 180
+    local other = v > 180 and v / 2 or v * 2
+    SetYaw(other)
+    local ok, err = pcall(OpenOrThrow)
+    if not ok then RestoreYaw(); error(err, 0) end
+    return ("cameraYawMoveSpeed %s -> %s, presenting"):format(tostring(v), tostring(other))
+end
+local function LeaveOrbitTrial(outcome)
+    if outcome ~= "done" and outcome ~= "yes" and outcome ~= "no" and outcome ~= "unsure" then
+        Close(); RestoreYaw()
+    end
+end
+
 -- A PLAYER_REGEN_DISABLED handler registered now, so after the library's:
--- what #21 refuses. Its Enter and HideGameUI must both say "combat".
+-- what #21 refuses. Its Enter and HideGameUI must both say "combat". It is
+-- disarmed when the tester leaves the wait, whatever the way.
+local function DisarmCombat()
+    if rel.combatFrame then rel.combatFrame:UnregisterEvent("PLAYER_REGEN_DISABLED") end
+end
 local function ReleaseArmCombat()
     rel.combat = { state = "armed" }
     rel.combatFrame = rel.combatFrame or CreateFrame("Frame")
@@ -1221,38 +1270,73 @@ local function ReleaseArmCombat()
     end)
     return "armed: pull a mob"
 end
-
 local function ReleaseCombatWait()
     local c = rel.combat or {}
     if c.state ~= "done" then return false, "waiting for combat to start" end
     return true, "Enter " .. c.enter, "HideGameUI " .. c.hide
 end
-
 local function ReleaseCombatCheck()
     local c = rel.combat or {}
+    if c.state ~= "done" then return false, "not measured: combat did not start" end
     local ok = c.enter == "false combat" and c.hide == "false combat"
     return ok, ok and "both refused with combat" or ("Enter " .. tostring(c.enter) .. ", HideGameUI " .. tostring(c.hide))
 end
 
--- The countdown: revealed as a dialog, and a HideGameUI 61 s later is still
--- refused (the old 60 s cap would have let it hide a 90 s countdown).
-local function ReleaseCountdownWait()
-    for _, r in ipairs(uiShown) do
-        if r == "dialog" then
-            rel.revealed = rel.revealed or GetTime()
-            local left = 61 - (GetTime() - rel.revealed)
-            if left <= 0 then return true, "61 s since the countdown brought the UI back" end
-            return false, ("the UI is back; %d s to go before the hide is tried"):format(math.ceil(left))
-        end
+-- The countdown, tied to its own events (START_PLAYER_COUNTDOWN and
+-- CANCEL_PLAYER_COUNTDOWN, in the 70959 dump): the hide is tried only when
+-- this countdown has run 61 s and is still going. A 90 s one, under the old
+-- 60 s cap, would have let it through.
+local function DisarmCountdown()
+    if rel.cdFrame then
+        pcall(rel.cdFrame.UnregisterEvent, rel.cdFrame, "START_PLAYER_COUNTDOWN")
+        pcall(rel.cdFrame.UnregisterEvent, rel.cdFrame, "CANCEL_PLAYER_COUNTDOWN")
     end
-    return false, "waiting for the countdown to bring the UI back"
 end
-
+local function ReleaseArmCountdown()
+    rel.cd = {}
+    rel.cdFrame = rel.cdFrame or CreateFrame("Frame")
+    pcall(rel.cdFrame.RegisterEvent, rel.cdFrame, "START_PLAYER_COUNTDOWN")
+    pcall(rel.cdFrame.RegisterEvent, rel.cdFrame, "CANCEL_PLAYER_COUNTDOWN")
+    rel.cdFrame:SetScript("OnEvent", function(_, event, _, timeRemaining)
+        if event == "START_PLAYER_COUNTDOWN" then
+            local ok, total = pcall(tonumber, timeRemaining)   -- may be secret (70959 dump)
+            rel.cd = { start = GetTime(), total = ok and total or nil }
+            say("  release: a countdown started, " .. tostring(rel.cd.total) .. " s")
+        elseif rel.cd.start then
+            rel.cd.cancelled = true
+            say("  release: the countdown was cancelled")
+        end
+    end)
+end
+local function CountdownRunning()
+    local cd = rel.cd or {}
+    if not cd.start then return false, "no countdown started" end
+    if cd.cancelled then return false, "the countdown was cancelled" end
+    local elapsed = GetTime() - cd.start
+    if cd.total and elapsed >= cd.total then return false, "the countdown is over" end
+    return true, elapsed
+end
+local function ReleaseCountdownWait()
+    local running, elapsed = CountdownRunning()
+    if not running then
+        if rel.cd and rel.cd.cancelled then rel.cd = {} end
+        return false, "waiting for /countdown 90 (" .. tostring(elapsed) .. ")"
+    end
+    if elapsed >= 61 then return true, "61 s into the countdown" end
+    return false, ("the countdown is running; %d s to go before the hide is tried"):format(math.ceil(61 - elapsed))
+end
 local function ReleaseCountdownHide()
+    rel.countdownOK = nil
+    local running, elapsed = CountdownRunning()
+    if not running or elapsed < 61 then
+        DisarmCountdown()
+        return "not measured: " .. (running and "the wait was cut short" or tostring(elapsed))
+    end
     local ok, why = SC:HideGameUI()
-    say(("  release: HideGameUI 61 s into the countdown -> %s %s"):format(tostring(ok), tostring(why)))
+    say(("  release: HideGameUI %d s into the countdown -> %s %s"):format(math.floor(elapsed), tostring(ok), tostring(why)))
     if ok then SC:RestoreGameUI() end
     rel.countdownOK = not ok and why == "dialog"
+    DisarmCountdown()
     return tostring(ok) .. " " .. tostring(why)
 end
 
@@ -1276,42 +1360,44 @@ local function ReleaseGamepadOpen()
     rel.centringWrites, rel.counting = 0, true
     local ok, err = pcall(OpenOrThrow)
     rel.counting = false
-    if not ok then error(err, 0) end
+    if not ok then rel.centringWrites = nil; error(err, 0) end
     local line = ("%d centring writes by Enter in gamepad mode"):format(rel.centringWrites)
     say("  release: " .. line)
-    return rel.centringWrites == 0, line
+    return line
 end
 
 Probe:Steps("release", {
-    title = "The r10 release check",
+    title = "The release check",
     { text = "Out of combat, somewhere open, on mouse and keyboard. Open starts a presentation.", button = "Open",
-      screenshot = "release: framing", run = function() OpenOrThrow(); return ReleaseFraming() end },
+      run = function() OpenOrThrow(); return ReleaseFraming() end },
+    { text = "Waiting for the camera to settle (a screenshot then).", timeout = 15, wait = Settled,
+      screenshot = "release: framing" },
     { text = "Is the character framed to one side and fully in view (a female character uses her own offset now)? Say the race and sex in the Note box.",
       ask = true },
     { text = "Note how fast the camera orbits, then Close.", button = "Close", run = Close },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
-    { text = "Faster sets cameraYawMoveSpeed to twice its value (the probe puts it back), then opens again.", button = "Faster",
-      run = function()
-          local v = tonumber(GetCVar("cameraYawMoveSpeed")) or 180
-          Set("cameraYawMoveSpeed", tostring(math.min(v * 2, 360)))
-          return OpenOrThrow()
-      end },
-    { text = "Is the orbit about the same speed as before, not twice as fast?", ask = true },
-    { text = "Close ends it and puts the turn speed back.", button = "Close", run = function() Close(); return RestoreAll() end },
+    { text = "Other speed sets cameraYawMoveSpeed to half or twice its value (put back after), then opens again.",
+      button = "Other speed", run = ReleaseOtherSpeed },
+    { text = "Is the orbit about the same speed as before (not twice or half as fast)?", ask = true, leave = LeaveOrbitTrial },
+    { text = "Close ends it and puts the turn speed back.", button = "Close",
+      run = function() Close(); return RestoreYaw() end, leave = LeaveOrbitTrial },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     -- #21
     { text = "Go next to a mob. Arm adds a combat-start handler after the library's, which tries Enter and HideGameUI.",
       button = "Arm", run = ReleaseArmCombat },
-    { text = "Pull the mob.", timeout = 300, wait = ReleaseCombatWait, check = ReleaseCombatCheck },
+    { text = "Pull the mob.", timeout = 300, wait = ReleaseCombatWait, check = ReleaseCombatCheck, leave = DisarmCombat },
     { text = "After the fight: did the UI stay up the whole time, with no presentation starting?", ask = true },
     -- #40 (a group)
-    { text = "In a group (Skip this part if solo): Open starts a presentation.", button = "Open", run = function()
-          uiShown, rel.revealed = {}, nil
-          return OpenOrThrow()
-      end },
-    { text = "Type /countdown 90. The UI comes back; this step waits 61 s more.", timeout = 180, wait = ReleaseCountdownWait },
+    { text = "In a group (Skip this part if solo): Open starts a presentation.", button = "Open",
+      run = function() ReleaseArmCountdown(); return OpenOrThrow() end },
+    { text = "Type /countdown 90. The UI comes back; this step waits until it has run 61 s.", timeout = 180,
+      wait = ReleaseCountdownWait,
+      leave = function(outcome) if outcome == "stopped" or outcome == "back" then DisarmCountdown() end end },
     { text = "Trying HideGameUI with the countdown still running: it must be refused.", auto = true, run = ReleaseCountdownHide,
-      check = function() return rel.countdownOK == true, "refused with dialog" end },
+      check = function()
+          if rel.countdownOK == nil then return false, "not measured" end
+          return rel.countdownOK, "refused with dialog"
+      end },
     { text = "Close ends the presentation.", button = "Close", run = Close },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     -- #54 (a controller)
@@ -1321,15 +1407,23 @@ Probe:Steps("release", {
           rel.centring = Centring()
           return "centring " .. rel.centring
       end },
-    { text = "Press a controller button to switch to gamepad mode, then Open.", button = "Open", run = ReleaseGamepadOpen },
+    { text = "Press a controller button to switch to gamepad mode, then Open.", button = "Open", run = ReleaseGamepadOpen,
+      check = function()
+          if rel.centringWrites == nil then return false, "not measured" end
+          return rel.centringWrites == 0, rel.centringWrites .. " centring writes"
+      end },
     { text = "Close ends the presentation.", button = "Close", run = Close },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     { text = "Move the mouse (back to mouse and keyboard), then Read again: the centring CVars must be as before.",
       button = "Read", run = function()
           if InGamepadMode() then error("gamepad mode is on: move the mouse, then Retry", 0) end
-          local now = Centring()
-          say("  release: centring " .. now .. " (before " .. tostring(rel.centring) .. ")")
-          return now == rel.centring, "centring " .. now .. ", before " .. tostring(rel.centring)
+          rel.centringAfter = Centring()
+          say("  release: centring " .. rel.centringAfter .. " (before " .. tostring(rel.centring) .. ")")
+          return "centring " .. rel.centringAfter .. ", before " .. tostring(rel.centring)
+      end,
+      check = function()
+          if rel.centring == nil then return false, "not measured: the first Read was skipped" end
+          return rel.centringAfter == rel.centring, "the same as before"
       end },
 })
 
@@ -1337,19 +1431,16 @@ Probe:Steps("release", {
 -- cameraYawMoveSpeed? The same MoveViewLeftStart(ORBIT_TEST_SPEED) at 90
 -- and at 360; the tester presses Turned when the camera is back on the same
 -- landmark, and the probe times each full turn. A ratio near 4 means it
--- scales (MINOR 7's compensation is right); near 1, it doesn't (the
--- compensation slows the orbit at a faster setting). r10's release check
--- (run #488) left it unclear.
+-- scales (MINOR 7's compensation is right); near 1, it doesn't. MEASURED
+-- 70959 (run #426): 40.1 s and 10.1 s, ratio 3.98. Leaving a turn any other
+-- way stops the camera and puts the turn speed back.
 local ORBIT_TEST_SPEED = 0.1
 local orbitT = {}
 
 local function OrbitStart(yaw)
     if window and window:IsShown() then window:Hide() end
     if SC:IsActive() or SC:IsOwner() then error("a presentation is running: wait for it to end, then Retry", 0) end
-    Set("cameraYawMoveSpeed", yaw)
-    if tostring(GetCVar("cameraYawMoveSpeed")) ~= yaw and tonumber(GetCVar("cameraYawMoveSpeed")) ~= tonumber(yaw) then
-        error("cameraYawMoveSpeed did not take " .. yaw .. ": Retry", 0)
-    end
+    SetYaw(yaw)
     MoveViewLeftStop()
     MoveViewLeftStart(ORBIT_TEST_SPEED)
     orbitT[yaw] = { start = GetTime() }
@@ -1364,6 +1455,9 @@ local function OrbitTurned(yaw)
     local line = ("cameraYawMoveSpeed %s: one turn in %.1f s"):format(yaw, t.seconds)
     say("  orbitspeed: " .. line)
     return line
+end
+local function LeaveTurn(outcome)
+    if outcome ~= "done" then MoveViewLeftStop(); RestoreYaw() end
 end
 
 local function OrbitVerdict()
@@ -1384,12 +1478,12 @@ Probe:Steps("orbitspeed", {
     { text = "Out of combat, standing still, somewhere with a clear landmark (a tree, a building). Don't touch the mouse or the turn keys until the end. Start sets the turn speed to 90 and turns the camera.",
       button = "Start", run = function() return OrbitStart("90") end },
     { text = "Press Turned the moment the landmark is back where it was (one full turn).", button = "Turned",
-      run = function() return OrbitTurned("90") end },
+      run = function() return OrbitTurned("90") end, leave = LeaveTurn },
     { text = "Start again, at turn speed 360.", button = "Start", run = function() return OrbitStart("360") end },
     { text = "Press Turned when the landmark is back where it was.", button = "Turned",
-      run = function() return OrbitTurned("360") end },
+      run = function() return OrbitTurned("360") end, leave = LeaveTurn },
     { text = "Comparing the two turns, then putting the turn speed back.", auto = true,
-      run = function() local ok, line = OrbitVerdict(); RestoreAll(); return ok, line end },
+      run = function() local ok, line = OrbitVerdict(); RestoreYaw(); return ok, line end },
 })
 
 Probe:Steps("rereg", {
