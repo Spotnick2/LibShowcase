@@ -1,8 +1,8 @@
 <#
     deploy-probe.ps1 - Install the measurement probe (docs/DESIGN.md, "Open
     measurements") as the addon LibShowcaseProbe, with this checkout embedded in
-    its Libs\. A brand-new addon folder needs a client restart the first time,
-    /reload after that.
+    its Libs\. In game, /reload loads it, a brand-new addon folder included
+    (PORTING-TBC-TO-FOREVER.md, section 5).
 
         pwsh Tools/deploy-probe.ps1
         pwsh Tools/deploy-probe.ps1 -AddOnsPath "D:\...\_forever_\Interface\AddOns"
@@ -23,4 +23,4 @@ foreach ($f in @("LibShowcaseProbe.toc", "Probe.lua")) {
 }
 & (Join-Path $PSScriptRoot "deploy.ps1") -Addon "LibShowcaseProbe" -AddOnsPath $AddOnsPath
 if ($LASTEXITCODE -ne 0) { Write-Error "library deploy refused"; exit 1 }
-Write-Host "Probe installed in $dest. In game: /lsprobe" -ForegroundColor Green
+Write-Host "Probe installed in $dest. In game: /reload, then /lsprobe" -ForegroundColor Green

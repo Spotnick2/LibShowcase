@@ -69,4 +69,4 @@ Get-ChildItem -LiteralPath $dest -File -Recurse | Where-Object { $keep -notconta
         Write-Host "  removing stale $($_.FullName.Substring($dest.Length + 1))" -ForegroundColor DarkYellow
         Remove-Item -LiteralPath $_.FullName -Force
     }
-Write-Host "  $($files.Count) files"
+Write-Host "  $($files.Count) files. In game: /reload"
