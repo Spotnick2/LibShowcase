@@ -352,6 +352,9 @@ do
         { "ROLE_POLL_BEGIN", { "Leader" }, nil },
         { "PVP_ROLE_POPUP_SHOW", { {} }, "PVP_ROLE_POPUP_HIDE", {} },
         { "START_LOOT_ROLL", { 7, 60000 }, "CANCEL_LOOT_ROLL", { 7 } },
+        -- #40: a pull countdown and a battleground / arena start timer.
+        { "START_PLAYER_COUNTDOWN", { "Player-1-00000001", 10, 10, true, "Leader" }, "CANCEL_PLAYER_COUNTDOWN", { "Player-1-00000001", true } },
+        { "START_TIMER", { 1, 120, 120 }, "STOP_TIMER_OF_TYPE", { 1 } },
     }
     for i, p in ipairs(prompts) do
         local ev = p[1]
@@ -378,6 +381,14 @@ do
         SC:ForceRestore()
     end
     eq(#forced, 0, "none is read as Escape/Alt+Z")
+
+    -- A countdown that runs out (no cancel) is closed by its own time.
+    SC:Enter(newWindow())
+    WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 10, 10, true, "Leader")
+    eq(select(2, SC:HideGameUI()), "dialog", "a running countdown keeps the UI up")
+    WoW.advance(12)
+    check(SC:HideGameUI(), "  and once its 10 s are over, the UI hides again")
+    SC:ForceRestore()
 
     -- Started before Enter: Enter presents with the UI up, until it ends.
     WoW.fire("READY_CHECK", "Leader", 35)

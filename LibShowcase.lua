@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 5
+local MAJOR, MINOR = "LibShowcase-1.0", 6
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -697,9 +697,11 @@ end
 
 -- Prompts Blizzard shows WITHOUT StaticPopup_Show, each its own frame under
 -- UIParent: a ready check, a dungeon-finder proposal or role check, a role
--- poll, a PvP role popup, a loot roll. Their start events (all in the 70205
--- dump) bring the UI back the same way; listening to an event touches
--- nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
+-- poll, a PvP role popup, a loot roll; and the timers drawn under UIParent:
+-- a group's pull countdown and a battleground or arena start timer (#40,
+-- in the 70959 dump, times in seconds). Their start events (the others in
+-- the 70205 dump) bring the UI back the same way; listening to an event
+-- touches nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
 -- until its end event, or its own time limit, or PROMPT_TIMEOUT: while one is
 -- open the UI is not hidden (HideUI), as for a StaticPopup already up. The
 -- role poll has no end event; its timeout ends it.
@@ -713,6 +715,10 @@ local PROMPT_START = {   -- event -> function(...) returning key, seconds?
     START_LOOT_ROLL     = function(rollID, rollTime)
         return "roll:" .. tostring(rollID), (tonumber(rollTime) or 0) / 1000   -- milliseconds
     end,
+    START_PLAYER_COUNTDOWN = function(_, timeRemaining) return "countdown", tonumber(timeRemaining) end,
+    START_TIMER         = function(timerType, timeRemaining)
+        return "timer:" .. tostring(timerType), tonumber(timeRemaining)
+    end,
 }
 local PROMPT_END = {     -- event -> function(...) returning the key, or a key prefix ending in "*"
     READY_CHECK_FINISHED   = function() return "ready" end,
@@ -724,6 +730,8 @@ local PROMPT_END = {     -- event -> function(...) returning the key, or a key p
     PVP_ROLE_POPUP_HIDE    = function() return "pvprole" end,
     CANCEL_LOOT_ROLL       = function(rollID) return "roll:" .. tostring(rollID) end,
     CANCEL_ALL_LOOT_ROLLS  = function() return "roll:*" end,
+    CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,
+    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(timerType) end,
 }
 local PROMPT_EVENTS = {}
 for ev in pairs(PROMPT_START) do PROMPT_EVENTS[#PROMPT_EVENTS + 1] = ev end

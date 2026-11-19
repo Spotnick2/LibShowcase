@@ -129,10 +129,14 @@ owner.
   **Prompts that are not StaticPopups** (each its own frame under UIParent) do the same through
   their events, which the library listens to (touching nothing): `READY_CHECK`,
   `LFG_PROPOSAL_SHOW`, `LFG_ROLE_CHECK_SHOW`, `ROLE_POLL_BEGIN`, `PVP_ROLE_POPUP_SHOW`,
-  `START_LOOT_ROLL` (all in the 70205 dump). Each stays **open** until its end event
+  `START_LOOT_ROLL` (all in the 70205 dump), and since MINOR 6 (#40) the timers drawn under
+  UIParent: `START_PLAYER_COUNTDOWN` (a group's pull countdown) and `START_TIMER` (a battleground
+  or arena start timer), both in the 70959 dump with their time in seconds. They reveal as
+  `"dialog"` too, like every prompt. Each stays **open** until its end event
   (`READY_CHECK_FINISHED`, `LFG_PROPOSAL_DONE`/`_FAILED`/`_SUCCEEDED`, `LFG_ROLE_CHECK_HIDE`/
-  `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`), its
-  own time limit (the ready check's, the roll's), or 60 s (the role poll has no end event). A roll
+  `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`,
+  `CANCEL_PLAYER_COUNTDOWN`, `STOP_TIMER_OF_TYPE` by timer type), its own time limit (the ready
+  check's, the roll's, the countdown's, the timer's), or 60 s (the role poll has no end event). A roll
   the player answers ends no earlier than its time limit, so the UI may stay up a little longer.
   **A StaticPopup already up, or a prompt still open,** when the UI would be hidden keeps it up:
   its Show already happened, so nothing would bring it back (`HideGameUI` returns
