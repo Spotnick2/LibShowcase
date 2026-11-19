@@ -149,8 +149,10 @@ owner.
   there; they stay, harmless. No getter sees the role poll (`ROLE_POLL_BEGIN`; run #415), the PvP
   role popup, or the role prompt that comes with a dungeon invite (run #417; it is not a
   `StaticPopup_Show` dialog, but `StaticPopupSpecial_Show(LFGInvitePopup)`, run #419): the library
-  knows them only by their events or dialog hooks. Not yet settled: which callback that popup
-  gives a presentation (Open measurements).
+  knows them only by their events or dialog hooks. MEASURED 70959 (`/fp steps ls invite`, run #421):
+  that popup while presenting gives `onGameUIShown("dialog")`, the UI back, the camera still
+  orbiting and the lease held; accepting and Logout work, no blocked action. (In run #419 a
+  presentation of AltStable's ended on it: that is AltStable's own handling, not the library's.)
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
   through `READY_CHECK`.
@@ -300,12 +302,10 @@ console and `LibShowcaseProbeDB.log`; each procedure's record is in `ForeverProb
 (`steps.records["LibShowcaseProbe/<name>"]`). The MEASURED notes above name the commands as they
 were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
-| Question | Procedure |
-|---|---|
-| The role prompt that comes with a dungeon invite (`StaticPopupSpecial_Show(LFGInvitePopup)`), while presenting: the UI came back in run #419, but the presentation (AltStable's) **ended**, which is `onForcedExit`, where a dialog should give `onGameUIShown("dialog")` and keep it. Which does it get? | `/fp steps ls invite` with that invite, no other showcase open |
+None is open.
 
-Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the
-ready-check getters and the idle prompt getters, `SetUIVisibility` in a lockdown (above), and the
+Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the prompt
+getters and the dungeon-invite role prompt, `SetUIVisibility` in a lockdown (above), and the
 `CameraZoomIn(0)` nudge: `/fp steps ls nudge` saw the shoulder offset apply at once with and
 without it, so the library doesn't need it (and never did it).
 
