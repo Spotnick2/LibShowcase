@@ -113,7 +113,7 @@ local M = {
     { "the presentation starts from view 3", { { "    pcall(SetView, 2)\n\n", "    pcall(SetView, 3)\n\n" } } },
     { "Exit does not snap the view back", { { "    if cam.capture and cam.capture.savedViewSlot then pcall(SetView, cam.capture.savedViewSlot) end\n", "" } } },
     { "re-entry during exit resumes", { { '        I.Restore(inst, "re-enter during exit")\n', '        cam.mode = "enter"\n        do return true end\n' } } },
-    { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom)" } } },
+    { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex)" } } },
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
     { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false\n", "" } } },
@@ -215,6 +215,11 @@ local M = {
     { "the resumed orbit uses the speed of Enter", {
         { "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end\n    cam.mode, cam.elapsed",
           "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\n    cam.mode, cam.elapsed" } } },
+    -- #38: the female column
+    { "the female column ignored", { { "local f = (tonumber(sex) == 3 and lib.FEMALE_SHOULDER_FACTORS[id])", "local f = (false and lib.FEMALE_SHOULDER_FACTORS[id])" } } },
+    { "the player's sex not asked", { { '    if type(UnitSex) == "function" then sex = UnitSex("player") end\n', "" } } },
+    { "the female table replaced on load", { { "lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {", "lib.FEMALE_SHOULDER_FACTORS = fill({}, {" } } },
+    { "an unknown race not sent to the default", { { "    if not lib.SHOULDER_FACTORS[id] then id = 0 end\n", "" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
 }
 

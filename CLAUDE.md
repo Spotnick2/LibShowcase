@@ -51,9 +51,9 @@ function, option, default, public table or table key. A breaking change is `LibS
   `LiftPopup(dialog)` ("reveal for a dialog": brings the UI back, returns the dialog untouched),
   `DropPopup(dialog)` (a no-op, kept for API stability).
 - Library functions, **dot-called**: `lib.SuppressExperimentalCVarPopup()`,
-  `lib.ShoulderOffsetFor(race, zoom, mounted?)`.
+  `lib.ShoulderOffsetFor(race, zoom, mounted?, sex?)`.
 - Public tables, filled in place: `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`,
-  `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
+  `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
 - The crash-heal keys in a consumer's `db` table: `LibShowcaseCapture` (the camera; keeps r3's
   shape) and `LibShowcaseNames` (`hideWorldNames`).
 - **One owner.** The camera and the game UI are global, so `lib.state` holds one lease. Every

@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 7
+local MAJOR, MINOR = "LibShowcase-1.0", 8
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -111,6 +111,23 @@ lib.SHOULDER_FACTORS = fill(lib.SHOULDER_FACTORS or {}, {
     [8]  = { 0.2787,  0.04   },  -- Troll
     [10] = { 0.361,  -0.1654 },  -- Blood Elf
     [11] = { 0.248,  -0.02   },  -- Draenei
+})
+-- The same table's FEMALE column (#38): SHOULDER_FACTORS above is its male
+-- column, and the female framing differs (a female Human sits about 0.16
+-- further at a 2.1 zoom). Used when the sex is 3 (UnitSex); a race missing
+-- here takes its male pair. Mounted: one pair for both.
+lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {
+    [0]  = { 0.361,  -0.1654 },  -- default
+    [1]  = { 0.38,    0.0311 },  -- Human
+    [2]  = { 0.3045, -0.0483 },  -- Orc
+    [3]  = { 0.3533, -0.02   },  -- Dwarf
+    [4]  = { 0.329,   0.025  },  -- Night Elf
+    [5]  = { 0.3447,  0.03   },  -- Undead
+    [6]  = { 0.2427, -0.1867 },  -- Tauren
+    [7]  = { 0.329,  -0.012  },  -- Gnome
+    [8]  = { 0.355,  -0.1317 },  -- Troll
+    [10] = { 0.3177,  0.0683 },  -- Blood Elf
+    [11] = { 0.3177,  0      },  -- Draenei
 })
 lib.MOUNTED_SHOULDER_FACTORS = fill(lib.MOUNTED_SHOULDER_FACTORS or {}, { 1.2495, -4.0 })
 -- UnitRace's second return (the race file) to the IDs above.
@@ -982,14 +999,17 @@ function I.TargetZoom(cfg)
 end
 
 -- The shoulder offset for a race (UnitRace's race file or race ID) at a zoom.
-function I.ShoulderOffsetFor(race, zoom, mounted)
+-- `sex` (optional, UnitSex's: 3 female) picks the female pair (#38);
+-- anything else, or none, the male one, as before.
+function I.ShoulderOffsetFor(race, zoom, mounted, sex)
     zoom = tonumber(zoom) or 0
     if mounted then
         local m = lib.MOUNTED_SHOULDER_FACTORS
         return zoom * m[1] + m[2]
     end
     local id = tonumber(race) or (race ~= nil and lib.RACE_IDS[race]) or 0
-    local f = lib.SHOULDER_FACTORS[id] or lib.SHOULDER_FACTORS[0]
+    if not lib.SHOULDER_FACTORS[id] then id = 0 end
+    local f = (tonumber(sex) == 3 and lib.FEMALE_SHOULDER_FACTORS[id]) or lib.SHOULDER_FACTORS[id]
     return zoom * f[1] + f[2]
 end
 lib.ShoulderOffsetFor = lib.ShoulderOffsetFor
@@ -999,12 +1019,13 @@ function I.PlayerShoulderOffset(cfg, zoom)
     if I.IsMounted(cfg) then
         return cfg.mountedShoulder or I.ShoulderOffsetFor(nil, cfg.mountedZoom, true)
     end
-    local race
+    local race, sex
     if type(UnitRace) == "function" then
         local _, raceFile, raceID = UnitRace("player")
         race = tonumber(raceID) or raceFile
     end
-    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom) * cfg.shoulderMult
+    if type(UnitSex) == "function" then sex = UnitSex("player") end
+    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult
 end
 
 -- Write the presentation's CVars (Enter, and again after a cast reset).
