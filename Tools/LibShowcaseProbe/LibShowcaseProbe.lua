@@ -33,6 +33,9 @@
 --             again, and after a /reload (#51)?
 --   tempcvar  the library's SetCVar over the gamepad's temp values on the
 --             centring CVars: what does each layer read, and what is left (#51)?
+--   release   the r10 release check: female framing, the orbit at another
+--             turn speed, a later combat-start handler refused, a 90 s
+--             countdown, a presentation in gamepad mode
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -1181,6 +1184,152 @@ Probe:Command("tempback", function()
     local ok, a, b = pcall(TempPutBack)   -- ok, true, line; or false, the error
     say("tempback: " .. tostring(ok and b or a))
 end, "put the centring CVars back after a stopped tempcvar run")
+
+-- 15. The r10 release check: what changed since r4 that only the client can
+-- show. The female framing (#38), the orbit at another turn speed (#39), a
+-- combat start refusing a later handler's Enter (#21), a long countdown
+-- holding the UI up (#40), and a presentation in gamepad mode (#54). The
+-- countdown and gamepad parts need a group and a controller: Skip them
+-- without.
+local rel = {}
+
+local function ReleaseFraming()
+    local _, raceFile, raceID = UnitRace("player")
+    local sex = G("UnitSex") and UnitSex("player")
+    local line = ("race %s (%s), sex %s, shoulder offset %s"):format(tostring(raceFile), tostring(raceID),
+        tostring(sex), tostring(GetCVar("test_cameraOverShoulder")))
+    say("  release: " .. line)
+    return true, line
+end
+
+-- A PLAYER_REGEN_DISABLED handler registered now, so after the library's:
+-- what #21 refuses. Its Enter and HideGameUI must both say "combat".
+local function ReleaseArmCombat()
+    rel.combat = { state = "armed" }
+    rel.combatFrame = rel.combatFrame or CreateFrame("Frame")
+    rel.combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    rel.combatFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        local okEnter, whyEnter = SC:Enter()
+        local okHide, whyHide = SC:HideGameUI()
+        rel.combat = { state = "done", enter = tostring(okEnter) .. " " .. tostring(whyEnter),
+                       hide = tostring(okHide) .. " " .. tostring(whyHide) }
+        say(("  release: in a later REGEN_DISABLED handler, Enter -> %s, HideGameUI -> %s"):format(rel.combat.enter, rel.combat.hide))
+        if okEnter or okHide then SC:ForceRestore("release check") end
+    end)
+    return "armed: pull a mob"
+end
+
+local function ReleaseCombatWait()
+    local c = rel.combat or {}
+    if c.state ~= "done" then return false, "waiting for combat to start" end
+    return true, "Enter " .. c.enter, "HideGameUI " .. c.hide
+end
+
+local function ReleaseCombatCheck()
+    local c = rel.combat or {}
+    local ok = c.enter == "false combat" and c.hide == "false combat"
+    return ok, ok and "both refused with combat" or ("Enter " .. tostring(c.enter) .. ", HideGameUI " .. tostring(c.hide))
+end
+
+-- The countdown: revealed as a dialog, and a HideGameUI 61 s later is still
+-- refused (the old 60 s cap would have let it hide a 90 s countdown).
+local function ReleaseCountdownWait()
+    for _, r in ipairs(uiShown) do
+        if r == "dialog" then
+            rel.revealed = rel.revealed or GetTime()
+            local left = 61 - (GetTime() - rel.revealed)
+            if left <= 0 then return true, "61 s since the countdown brought the UI back" end
+            return false, ("the UI is back; %d s to go before the hide is tried"):format(math.ceil(left))
+        end
+    end
+    return false, "waiting for the countdown to bring the UI back"
+end
+
+local function ReleaseCountdownHide()
+    local ok, why = SC:HideGameUI()
+    say(("  release: HideGameUI 61 s into the countdown -> %s %s"):format(tostring(ok), tostring(why)))
+    if ok then SC:RestoreGameUI() end
+    rel.countdownOK = not ok and why == "dialog"
+    return tostring(ok) .. " " .. tostring(why)
+end
+
+-- Gamepad mode: the presentation leaves the two centring CVars alone. The
+-- stored values are read on mouse and keyboard, before and after (in gamepad
+-- mode a read returns the temps); Enter's writes are counted by a SetCVar
+-- post-hook, which leaves the call secure.
+local function Centring()
+    return tostring(GetCVar("CameraKeepCharacterCentered")) .. "/" .. tostring(GetCVar("CameraReduceUnexpectedMovement"))
+end
+local function IsCentring(name) return name == "CameraKeepCharacterCentered" or name == "CameraReduceUnexpectedMovement" end
+
+local function ReleaseGamepadOpen()
+    if not InGamepadMode() then error("not in gamepad mode: press a button on the controller, then Retry", 0) end
+    if not rel.hooked then
+        hooksecurefunc("SetCVar", function(name)
+            if rel.counting and IsCentring(name) then rel.centringWrites = rel.centringWrites + 1 end
+        end)
+        rel.hooked = true
+    end
+    rel.centringWrites, rel.counting = 0, true
+    local ok, err = pcall(OpenOrThrow)
+    rel.counting = false
+    if not ok then error(err, 0) end
+    local line = ("%d centring writes by Enter in gamepad mode"):format(rel.centringWrites)
+    say("  release: " .. line)
+    return rel.centringWrites == 0, line
+end
+
+Probe:Steps("release", {
+    title = "The r10 release check",
+    { text = "Out of combat, somewhere open, on mouse and keyboard. Open starts a presentation.", button = "Open",
+      screenshot = "release: framing", run = function() OpenOrThrow(); return ReleaseFraming() end },
+    { text = "Is the character framed to one side and fully in view (a female character uses her own offset now)? Say the race and sex in the Note box.",
+      ask = true },
+    { text = "Note how fast the camera orbits, then Close.", button = "Close", run = Close },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Faster sets cameraYawMoveSpeed to twice its value (the probe puts it back), then opens again.", button = "Faster",
+      run = function()
+          local v = tonumber(GetCVar("cameraYawMoveSpeed")) or 180
+          Set("cameraYawMoveSpeed", tostring(math.min(v * 2, 360)))
+          return OpenOrThrow()
+      end },
+    { text = "Is the orbit about the same speed as before, not twice as fast?", ask = true },
+    { text = "Close ends it and puts the turn speed back.", button = "Close", run = function() Close(); return RestoreAll() end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    -- #21
+    { text = "Go next to a mob. Arm adds a combat-start handler after the library's, which tries Enter and HideGameUI.",
+      button = "Arm", run = ReleaseArmCombat },
+    { text = "Pull the mob.", timeout = 300, wait = ReleaseCombatWait, check = ReleaseCombatCheck },
+    { text = "After the fight: did the UI stay up the whole time, with no presentation starting?", ask = true },
+    -- #40 (a group)
+    { text = "In a group (Skip this part if solo): Open starts a presentation.", button = "Open", run = function()
+          uiShown, rel.revealed = {}, nil
+          return OpenOrThrow()
+      end },
+    { text = "Type /countdown 90. The UI comes back; this step waits 61 s more.", timeout = 180, wait = ReleaseCountdownWait },
+    { text = "Trying HideGameUI with the countdown still running: it must be refused.", auto = true, run = ReleaseCountdownHide,
+      check = function() return rel.countdownOK == true, "refused with dialog" end },
+    { text = "Close ends the presentation.", button = "Close", run = Close },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    -- #54 (a controller)
+    { text = "With a controller (Skip this part without one). On mouse and keyboard, Read records the centring CVars.",
+      button = "Read", run = function()
+          if InGamepadMode() then error("gamepad mode is on: move the mouse, then Retry", 0) end
+          rel.centring = Centring()
+          return "centring " .. rel.centring
+      end },
+    { text = "Press a controller button to switch to gamepad mode, then Open.", button = "Open", run = ReleaseGamepadOpen },
+    { text = "Close ends the presentation.", button = "Close", run = Close },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Move the mouse (back to mouse and keyboard), then Read again: the centring CVars must be as before.",
+      button = "Read", run = function()
+          if InGamepadMode() then error("gamepad mode is on: move the mouse, then Retry", 0) end
+          local now = Centring()
+          say("  release: centring " .. now .. " (before " .. tostring(rel.centring) .. ")")
+          return now == rel.centring, "centring " .. now .. ", before " .. tostring(rel.centring)
+      end },
+})
 
 Probe:Steps("rereg", {
     title = "The experimental-CVar popup, re-registered",

@@ -642,6 +642,56 @@ fp("steps stop")
 fp("ls tempback")
 rawset(_G, "C_CVar", hadCVar)
 
+-- The r10 release check. The stub's input style (C_InputInterfaceStyle, in
+-- the 70959 dump) is put back for its gamepad part.
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return WoW.inputStyle end })
+WoW.sex = 3
+fp("steps ls release")
+rec = record("release")
+local shots0 = shots
+S.Run(); shoot()
+check(tostring(rec.results[1].detail):find("sex 3, shoulder offset", 1, true), "release 1: presenting, the race and sex logged")
+eq(shots, shots0 + 1, "  with a screenshot")
+S.Answer(true)
+S.Run(); untilEnded()
+eq(rec.at, 5, "release 4: ended")
+WoW.cvars.cameraYawMoveSpeed = "180"
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "360", "release 5: the turn speed doubled")
+check(SC:IsActive(), "  presenting again")
+S.Answer(true)
+S.Run(); untilEnded()
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "release 7: the turn speed put back")
+eq(rec.at, 9, "release 8: ended")
+S.Run()
+WoW.enterCombat()
+S.Poll()
+eq(rec.results[10].check, "PASS", "release 10: a later REGEN_DISABLED handler's Enter and HideGameUI refused")
+check(not SC:IsActive() and UIParent:IsShown(), "  nothing presented")
+WoW.leaveCombat()
+S.Answer(true)
+S.Run()
+WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 90, 90, true, "Leader")
+S.Poll()
+eq(rec.at, 13, "release 13: the countdown brought the UI back, 61 s to go")
+WoW.advance(62)
+S.Poll()
+eq(rec.results[14].check, "PASS", "release 14: HideGameUI 61 s into a 90 s countdown is refused")
+S.Run(); untilEnded()
+WoW.fire("CANCEL_PLAYER_COUNTDOWN", "Player-1-00000001", true)
+S.Run()
+check(tostring(rec.results[17].detail):find("centring 1/0", 1, true), "release 17: the centring read on mouse and keyboard")
+WoW.gamepadMode(true)
+S.Run()
+check(logHas("release: 0 centring writes by Enter in gamepad mode"), "release 18: Enter in gamepad mode wrote no centring CVar")
+S.Run(); untilEnded()
+WoW.gamepadMode(false)
+S.Run()
+eq(rec.status, "done", "the release procedure finishes")
+check(logHas("release: centring 1/0 (before 1/0)"), "release 21: the centring CVars as before")
+rawset(_G, "C_InputInterfaceStyle", nil)
+WoW.sex = 2
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
