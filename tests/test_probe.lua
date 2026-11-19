@@ -386,6 +386,59 @@ eq(rec.status, "done", "the sound procedure finishes")
 check(tostring(rec.results[8].detail):find("target exists true", 1, true), "  reading the target again")
 eq(rec.results[4].status, "yes", "  the answers saved")
 
+-- #51: does the camera still follow after a presentation? ConsoleGetAllCommands
+-- is in the 70959 dump; here it lists two camera CVars, a command and another.
+WoW.cvars.cameraView, WoW.cvars.cameraSmoothStyle = "0", "4"
+rawset(_G, "ConsoleGetAllCommands", function()
+    return { { command = "cameraSmoothStyle", commandType = 0 }, { command = "cameraView", commandType = 0 },
+             { command = "cameraZoomReset", commandType = 1 }, { command = "Sound_EnableSFX", commandType = 0 } }
+end)
+local function untilEnded()
+    ticks(0.1, 20)
+    WoW.flushTimers()
+    S.Poll()
+end
+fp("steps ls follow")
+rec = record("follow")
+S.Next(); S.Answer(true)
+check(tostring(rec.results[3].detail):find("cameraView 0, cameraSmoothStyle 4", 1, true), "follow 3: the before snapshot")
+eq(DB.follow.before.cameraSmoothStyle, "4", "  kept in the saved variables")
+eq(DB.follow.before.Sound_EnableSFX, nil, "  camera CVars only")
+S.Run()
+check(SC:IsActive() and win:IsShown(), "follow 4: presenting")
+S.Run(); untilEnded()
+check(tostring(rec.results[6].detail):find("the presentation ended", 1, true), "follow 6: a normal exit")
+check(tostring(rec.results[7].detail):find("exit: ", 1, true), "follow 7: compared")
+S.Answer(true)
+S.Run()
+WoW.playerSetUIVisibility(true)
+-- What the lead in #51 suspects: the view left on another index.
+WoW.cvars.cameraView = "5"
+untilEnded()
+eq(rec.at, 12, "follow 10: Escape ends it, then the comparison runs")
+check(tostring(rec.results[11].detail):find("cameraView 0 -> 5", 1, true), "follow 11: a changed CVar is named")
+eq(DB.follow.escape[1], "cameraView 0 -> 5", "  and saved")
+S.Answer(false)
+S.Run()
+WoW.enterCombat(); WoW.leaveCombat()
+untilEnded()
+eq(rec.at, 16, "follow 14: combat ends it")
+S.Answer(true)
+S.Run()
+check(SC:IsActive(), "follow 17: presenting before the /reload")
+S.Next()   -- the /reload
+win:Hide(); untilEnded()
+check(tostring(rec.results[19].detail):find("reload: ", 1, true), "follow 19: compared after the /reload")
+S.Answer(true)
+S.Run()
+eq(WoW.camera.view, 0, "follow 21: Return goes back to the view of before")
+check(tostring(rec.results[21].detail):find("SetView(0) from view 5", 1, true), "  and says so")
+WoW.cvars.cameraSmoothStyle = "0"
+S.Answer(true)
+eq(WoW.cvars.cameraSmoothStyle, "4", "follow 23: every camera CVar put back")
+eq(rec.status, "done", "the follow procedure finishes")
+rawset(_G, "ConsoleGetAllCommands", nil)
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------

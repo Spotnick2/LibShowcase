@@ -26,6 +26,9 @@
 --   sound     hiding the UI with a target selected: does the "target lost"
 --             click play (#41)? Alt+Z first (the control), then the library's
 --             own hide
+--   follow    every camera CVar before a presentation, then after a normal
+--             exit, Escape, combat and a /reload mid-presentation: does the
+--             camera still follow the character (#51)?
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -693,6 +696,158 @@ Probe:Steps("sound", {
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     { text = "Is your target still selected?", ask = true },
     { text = "Reading the target again.", auto = true, run = TargetState },
+})
+
+-- 12. #51: after a presentation, does the camera still follow the character?
+-- A player reported it didn't. Unmeasured lead: Enter saves the player's view
+-- into savedViewSlot (5) and switches to view 2; every exit ends on
+-- SetView(5), and cameraView is never captured. The snapshot is every camera
+-- CVar the client lists (ConsoleGetAllCommands, in the 70959 dump; a fixed
+-- list without it), kept in the saved variables so the /reload step compares
+-- with the same "before".
+local FOLLOW_CVARS = { "cameraView", "cameraSmoothStyle", "cameraSmoothTrackingStyle",
+    "CameraKeepCharacterCentered", "CameraReduceUnexpectedMovement", "test_cameraOverShoulder",
+    "test_cameraDynamicPitch", "cameraDistanceMaxZoomFactor", "cameraViewBlendStyle", "cameraYawMoveSpeed" }
+
+local function CameraCVars()
+    local names, seen = {}, {}
+    local function add(n)
+        if type(n) == "string" and not seen[n] then seen[n] = true; names[#names + 1] = n end
+    end
+    for _, n in ipairs(FOLLOW_CVARS) do add(n) end
+    local all = G("ConsoleGetAllCommands")
+    if type(all) == "function" then
+        local ok, list = pcall(all)
+        if ok and type(list) == "table" then
+            for _, c in ipairs(list) do
+                if type(c) == "table" and (c.commandType == nil or c.commandType == 0)
+                    and type(c.command) == "string" and c.command:lower():find("camera") then
+                    add(c.command)
+                end
+            end
+        end
+    end
+    local t = {}
+    for _, n in ipairs(names) do
+        local ok, v = pcall(GetCVar, n)
+        if ok and v ~= nil then t[n] = tostring(v) end
+    end
+    return t
+end
+
+local function FollowDB()
+    LibShowcaseProbeDB.follow = type(LibShowcaseProbeDB.follow) == "table" and LibShowcaseProbeDB.follow or {}
+    return LibShowcaseProbeDB.follow
+end
+
+local function FollowBefore()
+    local snap, n = CameraCVars(), 0
+    for _ in pairs(snap) do n = n + 1 end
+    FollowDB().before = snap
+    local line = ("before: %d camera CVars; cameraView %s, cameraSmoothStyle %s, KeepCentered %s, ReduceUnexpected %s")
+        :format(n, tostring(snap.cameraView), tostring(snap.cameraSmoothStyle),
+            tostring(snap.CameraKeepCharacterCentered), tostring(snap.CameraReduceUnexpectedMovement))
+    say("== follow " .. line)
+    return line
+end
+
+-- Every camera CVar that differs from the "before" snapshot, logged one by
+-- one; the step's detail lists them.
+local function FollowDiff(tag)
+    local before = FollowDB().before
+    if type(before) ~= "table" then return false, "no before snapshot: start the procedure again" end
+    local now, changed = CameraCVars(), {}
+    local names = {}
+    for n in pairs(before) do names[#names + 1] = n end
+    for n in pairs(now) do if before[n] == nil then names[#names + 1] = n end end
+    table.sort(names)
+    for _, n in ipairs(names) do
+        if before[n] ~= now[n] then
+            changed[#changed + 1] = ("%s %s -> %s"):format(n, tostring(before[n]), tostring(now[n]))
+        end
+    end
+    FollowDB()[tag] = changed
+    say(("== follow %s: %d changed"):format(tag, #changed))
+    for _, c in ipairs(changed) do say("  " .. c) end
+    return true, ("%s: %d changed%s"):format(tag, #changed, #changed > 0 and (": " .. table.concat(changed, "; ")) or "")
+end
+
+local function FollowOpen()
+    if window and window:IsShown() then window:Hide() end
+    Show()
+    if SC:IsActive() and SC:IsOwner() then return true, "presenting" end
+    return false, "the presentation did not start: close any other showcase, then Back and Open again"
+end
+
+-- Back to the view the player had before (the candidate fix), only if the
+-- presentation left another one.
+local function FollowReturn()
+    local before = FollowDB().before
+    local view = type(before) == "table" and tonumber(before.cameraView)
+    local now = GetCVar("cameraView")
+    if not view then return false, "no cameraView in the before snapshot" end
+    if tostring(view) == tostring(now) then return true, "already on view " .. tostring(now) .. ": nothing to do" end
+    local ok, err = pcall(SetView, view)
+    local line = ("SetView(%d) from view %s: pcall %s %s, cameraView now %s")
+        :format(view, tostring(now), tostring(ok), tostring(err), tostring(GetCVar("cameraView")))
+    say("  " .. line)
+    return ok, line
+end
+
+-- Every camera CVar back to "before", and the view: the player's camera as it
+-- was when the procedure started.
+local function FollowRestore()
+    local before = FollowDB().before
+    if type(before) ~= "table" then return false, "no before snapshot" end
+    local n = 0
+    for cvar, v in pairs(before) do
+        if cvar ~= "cameraView" and GetCVar(cvar) ~= v then
+            if cvar:find("^test_") then lib().SuppressExperimentalCVarPopup() end
+            pcall(SetCVar, cvar, v)
+            n = n + 1
+        end
+    end
+    local _, view = FollowReturn()
+    say(("  follow: %d camera CVars put back; %s"):format(n, tostring(view)))
+    return true, n .. " CVars put back; " .. tostring(view)
+end
+
+local FOLLOW_ASK = "Walk forward and turn with the keyboard (A/D or Q/E), without the mouse. Does the camera swing back behind the character as it did at the start?"
+
+Probe:Steps("follow", {
+    title = "Does the camera still follow after a presentation (#51)",
+    { text = "Out of combat, somewhere open. In Options > Camera, set Camera Following Style to Smart or Always and say which in the Note box." },
+    { text = FOLLOW_ASK .. " (The control: it should.)", ask = true },
+    { text = "Recording every camera CVar.", auto = true, run = FollowBefore },
+    -- 1. A normal exit.
+    { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
+    { text = "Close ends it normally.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return "closing"
+      end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Comparing the camera CVars with before.", auto = true, run = function() return FollowDiff("exit") end },
+    { text = "After a normal exit: " .. FOLLOW_ASK, ask = true },
+    -- 2. Escape.
+    { text = "Open starts it again.", button = "Open", run = FollowOpen },
+    { text = "Press Escape once: the UI comes back and the presentation ends.", timeout = 120, wait = PresentationEnded },
+    { text = "Comparing.", auto = true, run = function() return FollowDiff("escape") end },
+    { text = "After Escape: " .. FOLLOW_ASK, ask = true },
+    -- 3. Combat.
+    { text = "Go next to a mob you can fight. Open starts the presentation.", button = "Open", run = FollowOpen },
+    { text = "Pull the mob: combat ends the presentation. Finish the fight.", timeout = 300, wait = PresentationEnded },
+    { text = "Out of combat now? Comparing.", auto = true, run = function() return FollowDiff("combat") end },
+    { text = "After combat: " .. FOLLOW_ASK, ask = true },
+    -- 4. /reload mid-presentation: the login heal restores the capture.
+    { text = "Open starts it once more.", button = "Open", run = FollowOpen },
+    { text = "While it is presenting, type /reload.", reload = true },
+    { text = "Comparing (after the heal).", auto = true, run = function() return FollowDiff("reload") end },
+    { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
+    -- The candidate fix, then everything back.
+    { text = "Return puts back the view you had before (cameraView), if the presentation left another one.",
+      button = "Return", run = FollowReturn },
+    { text = "Now: " .. FOLLOW_ASK, ask = true },
+    { text = "Putting every camera CVar back as it was at the start.", auto = true, run = FollowRestore },
 })
 
 Probe:Steps("rereg", {
