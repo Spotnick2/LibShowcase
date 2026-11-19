@@ -349,4 +349,43 @@ do
     check(not pcall(SC.Enter, nil), "a dot-called method errors")
 end
 
+
+------------------------------------------------------------------------------
+-- #39: the orbit follows the player's cameraYawMoveSpeed as the turn does.
+-- MoveView*Start's speed is a multiple of it, so orbitSpeed is scaled to
+-- mean the same speed whatever the setting (the default 180: unchanged).
+------------------------------------------------------------------------------
+for _, case in ipairs({ { "90", 180 / 90 }, { "180", 1 }, { "360", 180 / 360 }, { "0", 1 }, { "fast", 1 } }) do
+    local lib = freshLibrary()
+    WoW.cvars.cameraYawMoveSpeed = case[1]
+    local SC = lib:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter()
+    ticks(0.1, 16)
+    local want = -(0.005 * case[2])
+    eq(WoW.camera.yaw, want, "cameraYawMoveSpeed " .. case[1] .. ": the settled orbit at orbitSpeed scaled by " .. case[2])
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    eq(WoW.camera.yaw, want, "  and the orbit a cast's end resumes")
+    SC:ForceRestore()
+end
+
+-- The setting changed after Enter (Codex, #48): the orbit reads it again when
+-- it starts at the end of the entry, and when a cast's end resumes it.
+do
+    local lib = freshLibrary()
+    WoW.cvars.cameraYawMoveSpeed = "90"
+    local SC = lib:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter()
+    ticks(0.1, 3)
+    WoW.cvars.cameraYawMoveSpeed = "180"
+    ticks(0.1, 13)
+    eq(WoW.camera.yaw, -0.005, "changed to 180 during the entry: the orbit starts at 180's speed, not 90's")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    WoW.cvars.cameraYawMoveSpeed = "360"
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    eq(WoW.camera.yaw, -0.0025, "changed to 360 during a cast: its end resumes at 360's speed")
+    SC:ForceRestore()
+    WoW.cvars.cameraYawMoveSpeed = "180"
+end
+
 done("test_presentation")
