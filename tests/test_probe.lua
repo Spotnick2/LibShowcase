@@ -260,12 +260,23 @@ fp("steps ls invite")
 rec = record("invite")
 S.Run()
 eq(rec.results[1].check, "FAIL", "invite 1: a refused Enter is a FAIL")
-check(logHas("the presentation did NOT start"), "  and says so")
+check(logHas("NOT ready: another showcase holds the presentation: close it, then press Back and Open again"),
+      "  and says why, and the way back the panel offers")
 other:ForceRestore()
 ticks(0.1, 20)
 WoW.flushTimers()
+-- A prompt already up: Enter starts the camera but the UI stays visible, so
+-- no invite could bring it back. Also a FAIL (Codex, PR #44).
+WoW.readyCheck = { status = "waiting", left = 30 }
 S.Back(); S.Run()
-eq(rec.results[1].check, "PASS", "invite 1: Retry with the lease free starts it")
+eq(rec.results[1].check, "FAIL", "invite 1: the UI kept up by a pending prompt is a FAIL")
+check(logHas("a dialog or prompt kept the UI up: answer or close it"), "  and says why")
+WoW.readyCheck = nil
+win:Hide()
+ticks(0.1, 20)
+WoW.flushTimers()
+S.Back(); S.Run()
+eq(rec.results[1].check, "PASS", "invite 1: Back, then Open, with nothing in the way starts it")
 check(win:IsShown() and not UIParent:IsShown(), "invite 1: presenting")
 S.Poll()
 eq(rec.at, 2, "invite 2: waits for the dialog")
