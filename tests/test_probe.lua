@@ -439,6 +439,30 @@ eq(WoW.cvars.cameraSmoothStyle, "4", "follow 23: every camera CVar put back")
 eq(rec.status, "done", "the follow procedure finishes")
 rawset(_G, "ConsoleGetAllCommands", nil)
 
+-- #51's follow-up: back to the default view. C_CVar.GetCVarDefault is in the
+-- 70959 dump; the default here is "0", the view left on 5.
+local hadCVar = rawget(_G, "C_CVar")
+rawset(_G, "C_CVar", { GetCVarDefault = function(name) return name == "cameraView" and "0" or nil end })
+WoW.cvars.cameraView = "5"
+fp("steps ls view")
+rec = record("view")
+check(tostring(rec.results[1].detail):find("start: cameraView 5 (default 0)", 1, true), "view 1: the view and its default read")
+S.Answer(false)
+S.Run()
+eq(WoW.cvars.cameraView, "0", "view 3: the CVar written to its default")
+check(tostring(rec.results[3].detail):find("SetCVar to the default 0 from 5", 1, true), "  and logged")
+S.Answer(false)
+WoW.cvars.cameraView = "5"
+S.Run()
+eq(WoW.camera.view, 0, "view 5: SetView with the default")
+S.Answer(true)
+eq(rec.at, 7, "view 7: the /reload")
+S.Next()
+check(tostring(rec.results[8].detail):find("reload: cameraView", 1, true), "view 8: read again after it")
+S.Answer(true)
+eq(rec.status, "done", "the view procedure finishes")
+rawset(_G, "C_CVar", hadCVar)
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------

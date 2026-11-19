@@ -29,6 +29,8 @@
 --   follow    every camera CVar before a presentation, then after a normal
 --             exit, Escape, combat and a /reload mid-presentation: does the
 --             camera still follow the character (#51)?
+--   view      back to the client's default cameraView: does the camera follow
+--             again, and after a /reload (#51)?
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -848,6 +850,60 @@ Probe:Steps("follow", {
       button = "Return", run = FollowReturn },
     { text = "Now: " .. FOLLOW_ASK, ask = true },
     { text = "Putting every camera CVar back as it was at the start.", auto = true, run = FollowRestore },
+})
+
+-- 13. #51, the follow-up. The follow run (#468) found the camera not
+-- following even before any presentation, on cameraView 5, which every
+-- account's config-cache.wtf keeps as a non-default SET. Back to the
+-- client's default view: does the camera follow again, and does it survive a
+-- /reload? C_CVar.GetCVarDefault is in the 70959 dump.
+local function ViewDefault()
+    local get = G("C_CVar") and C_CVar.GetCVarDefault
+    local ok, d = false, nil
+    if type(get) == "function" then ok, d = pcall(get, "cameraView") end
+    return ok and d or nil
+end
+
+local function ViewRead(tag)
+    local line = ("%s: cameraView %s (default %s), cameraSmoothStyle %s"):format(tag, tostring(GetCVar("cameraView")),
+        tostring(ViewDefault()), tostring(GetCVar("cameraSmoothStyle")))
+    say("== view " .. line)
+    return line
+end
+
+-- how: "cvar" writes the CVar, "setview" calls SetView with the default.
+local function ViewToDefault(how)
+    local d = ViewDefault()
+    if d == nil then return false, "no default for cameraView (C_CVar.GetCVarDefault)" end
+    local before = GetCVar("cameraView")
+    local ok, err
+    if how == "cvar" then
+        ok, err = pcall(SetCVar, "cameraView", d)
+    else
+        local n = tonumber(d)
+        if not n then return false, "the default " .. tostring(d) .. " is not a view number" end
+        ok, err = pcall(SetView, n)
+    end
+    local line = ("%s to the default %s from %s: pcall %s %s, cameraView now %s"):format(how == "cvar" and "SetCVar" or "SetView",
+        tostring(d), tostring(before), tostring(ok), tostring(err), tostring(GetCVar("cameraView")))
+    say("  " .. line)
+    return ok, line
+end
+
+Probe:Steps("view", {
+    title = "Back to the default camera view (#51)",
+    { text = "Out of combat, somewhere open, Camera Following Style as before. Reading the view.", auto = true,
+      run = function() return ViewRead("start") end },
+    { text = FOLLOW_ASK .. " (The control: in the follow run it did not.)", ask = true },
+    { text = "Write sets the cameraView CVar to its default (don't touch the mouse; note whether the camera jumps).",
+      button = "Write", run = function() return ViewToDefault("cvar") end },
+    { text = "Did the camera move when you pressed Write? " .. FOLLOW_ASK, ask = true },
+    { text = "If it already follows, press Skip. Otherwise SetView switches to the default view.",
+      button = "SetView", run = function() return ViewToDefault("setview") end },
+    { text = "Did the camera move? " .. FOLLOW_ASK, ask = true },
+    { text = "Type /reload: does the default view stay?", reload = true },
+    { text = "Reading the view after the /reload.", auto = true, run = function() return ViewRead("reload") end },
+    { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
 })
 
 Probe:Steps("rereg", {
