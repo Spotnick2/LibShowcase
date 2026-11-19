@@ -266,15 +266,23 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 - The `UnitBuff` mount-icon scan is gone: `UnitBuff` is absent from the 70205 API dump, so it
   never ran on Forever.
 
-## Open measurements (`Tools/LibShowcaseProbe`, `/lsprobe`)
+## Open measurements (`Tools/LibShowcaseProbe`, `/fp ls`)
 
-| Question | Command |
+The probe is a ForeverProbe module (#26): `pwsh Tools/deploy-probe.ps1` installs the host and the
+probe with this checkout embedded, `/reload`, then `/fp steps ls <name>` runs a procedure (a panel
+of buttons that saves every outcome) and `/fp ls <command>` a one-off. Its lines go to the `/fp`
+console and `LibShowcaseProbeDB.log`; each procedure's record is in `ForeverProbe.lua`
+(`steps.records["LibShowcaseProbe/<name>"]`). The MEASURED notes above name the commands as they
+were then: `/lsprobe <command>` is now `/fp ls <command>`.
+
+| Question | Procedure |
 |---|---|
-| Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/lsprobe pitch` |
-| Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/lsprobe nudge 0`, `/lsprobe nudge 1` |
-| `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/lsprobe combat` |
-| The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/lsprobe prompts` with a ready check (or a loot roll) waiting, then after answering |
+| Does `test_cameraDynamicPitch` do anything with centring cleared? (69913: inert, not re-tested) | `/fp steps ls pitch` |
+| Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/fp steps ls nudge` (without, then with) |
+| `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/fp steps ls combat` |
+| The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/fp steps ls prompts` (a ready check or a loot roll waiting, then answered) |
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
-securely (`issecurevariable`), and `/lsprobe focus` lists the tainted fields of the frame under the
-mouse: re-run `/lsprobe invite`, `/lsprobe rereg` and `/lsprobe taint` when the build changes.
+securely (`issecurevariable`), every blocked action is copied into its log, and `/fp ls focus`
+lists the tainted fields of the frame under the mouse. Re-run `/fp steps ls invite`,
+`/fp steps ls rereg`, `/fp steps ls names` and `/fp ls taint` when the build changes.

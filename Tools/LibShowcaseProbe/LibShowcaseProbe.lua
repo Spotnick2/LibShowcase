@@ -1,0 +1,630 @@
+----------------------------------------------------------------------------
+-- LibShowcaseProbe: LibShowcase's developer probe, a ForeverProbe module
+-- (/fp ls). The in-game measurements docs/DESIGN.md lists as open, and the
+-- ones to run again when the build changes. Its lines go to the ForeverProbe
+-- console and LibShowcaseProbeDB.log, never to chat. Never shipped: it lives
+-- under Tools/, which every consumer's .pkgmeta ignores.
+--
+-- Guided procedures (/fp steps ls <name>), each a panel of buttons that saves
+-- every outcome:
+--   pitch     test_cameraDynamicPitch with centring cleared: does the camera
+--             tilt with movement?
+--   nudge     the shoulder offset written without, then with, Narcissus's
+--             CameraZoomIn(0) nudge: does the character move at once?
+--   combat    SetUIVisibility(false) then (true) once InCombatLockdown() is
+--             really true (it isn't in PLAYER_REGEN_DISABLED, MEASURED 70205)
+--   prompts   every return of the prompt getters the library asks before
+--             hiding, with a ready check (or a loot roll) waiting, then not
+--   invite    a friend's party or guild invite while presenting: the UI comes
+--             back, the camera keeps orbiting, accepting and Logout work.
+--             The probe never shows a Blizzard dialog itself.
+--   names     hideWorldNames in a crowded place, then the values after the
+--             restore and after a /reload
+--   rereg     the experimental-CVar popup with its handler left unregistered,
+--             re-registered with Blizzard's own function, and with a closure;
+--             the player types the /console line
+--
+-- Commands (/fp ls <command>), for a one-off:
+--   pitch [off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
+--   names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus |
+--   next | restore | clear
+-- Always on: every StaticPopup_Show logs, a frame later, whether each shown
+-- dialog's `which` was written securely (issecurevariable) or TAINTED, and by
+-- which addon. The host's baseline logs every ADDON_ACTION_BLOCKED /
+-- FORBIDDEN; this module copies each into its own log (Probe:OnBlocked).
+----------------------------------------------------------------------------
+
+local ADDON, NS = ...
+local MAX_LOG = 2000
+local Probe = ForeverProbe:Module("LibShowcaseProbe", { api = 1, cmd = "ls" })
+local function say(msg) Probe:Say(msg) end
+local function G(name) return rawget(_G, name) end
+
+local SC
+local saved = {}             -- CVar -> value before the probe touched it
+local blockedSeen = {}       -- every blocked action this session, as text
+
+local function lib() return LibStub("LibShowcase-1.0") end
+local function build() return select(2, GetBuildInfo()) end
+
+local function Save(cvar)
+    if saved[cvar] == nil then saved[cvar] = GetCVar(cvar) or false end
+end
+
+local function Set(cvar, value)
+    Save(cvar)
+    if cvar:find("^test_") then lib().SuppressExperimentalCVarPopup() end
+    SetCVar(cvar, value)
+    local back = GetCVar(cvar)
+    say(("  %s = %s (read back %s)"):format(cvar, tostring(value), tostring(back)))
+    return back
+end
+
+local function RestoreAll()
+    local n = 0
+    for cvar, v in pairs(saved) do
+        if v ~= false then
+            if cvar:find("^test_") then lib().SuppressExperimentalCVarPopup() end
+            SetCVar(cvar, v)
+            n = n + 1
+        end
+    end
+    saved = {}
+    ConsoleExec("pitchlimit 88")
+    say("restored every CVar the probe touched (" .. n .. ")")
+    return n
+end
+
+-- The /console line for the player to type: a value that CHANGES the CVar
+-- (a write that changes nothing may raise no popup, which would read as
+-- "suppressed"). Typed by the player, the write is a secure one.
+local function Next()
+    local v = tonumber(GetCVar("test_cameraOverShoulder")) or 0
+    v = v >= 0.85 and 0 or math.floor(v * 10 + 0.5) / 10 + 0.1
+    local line = ("/console test_cameraOverShoulder %.1f"):format(v)
+    say(("  type: %s  (now %s). Popup or not? Click Disable if it shows")
+        :format(line, tostring(GetCVar("test_cameraOverShoulder"))))
+    return line
+end
+
+local function ClearCentring()
+    for _, cvar in ipairs(lib().CENTRING_CVARS) do
+        if GetCVar(cvar) ~= nil then Set(cvar, "0") end
+    end
+end
+
+-- Every blocked action since `from` (an index into blockedSeen), as one line.
+local function BlockedSince(from)
+    local t = {}
+    for i = (from or 0) + 1, #blockedSeen do t[#t + 1] = blockedSeen[i] end
+    return #t, #t > 0 and table.concat(t, "; ") or "none"
+end
+
+-- 1. Dynamic pitch, with the centring CVars that cancelled the shoulder offset cleared.
+local function Pitch(arg)
+    if arg == "off" then return RestoreAll() end
+    say("== pitch: build " .. build())
+    ClearCentring()
+    local back = Set("test_cameraDynamicPitch", "1")
+    say("  now walk forward and backward. Does the camera tilt (pitch) with movement?")
+    return back
+end
+
+-- 2. Is Narcissus's CameraZoomIn(0) nudge needed for the offset to apply?
+local function Nudge(arg)
+    say("== nudge " .. tostring(arg))
+    ClearCentring()
+    Set("test_cameraOverShoulder", "0")
+    local want = arg == "1" and 1.5 or 1.4
+    local back = Set("test_cameraOverShoulder", want)
+    if arg == "1" then
+        CameraZoomIn(0)
+        say("  offset written, THEN CameraZoomIn(0)")
+    else
+        say("  offset written, no nudge")
+    end
+    say("  Did the character move sideways right away (without touching the mouse)?")
+    return back
+end
+
+-- 3. SetUIVisibility under a real lockdown. REGEN_DISABLED itself is NOT
+-- locked (measured 70205), so wait until InCombatLockdown() turns true.
+-- combat.state: "armed", "waiting", "half" (hidden, not shown yet), "done".
+local combat = {}
+local function Combat()
+    combat = { state = "armed", blocked = #blockedSeen }
+    say("== combat: armed. Pull something; results log when the lockdown is on")
+    return "armed"
+end
+
+local function RunCombatChecks(tries)
+    if not InCombatLockdown() then
+        if tries > 200 then
+            say("  lockdown never came on (10 s)")
+            combat.state = "no lockdown"
+            return
+        end
+        C_Timer.After(0.05, function() RunCombatChecks(tries + 1) end)
+        return
+    end
+    say(("  InCombatLockdown() true after %d polls"):format(tries))
+    local ok1, err1 = pcall(SetUIVisibility, false)
+    combat.hide = ("pcall %s %s, UIParent shown %s"):format(tostring(ok1), tostring(err1), tostring(UIParent:IsShown()))
+    say("  SetUIVisibility(false) in combat: " .. combat.hide)
+    combat.state = "half"
+    C_Timer.After(0.5, function()
+        local ok2, err2 = pcall(SetUIVisibility, true)
+        combat.show = ("pcall %s %s, UIParent shown %s"):format(tostring(ok2), tostring(err2), tostring(UIParent:IsShown()))
+        say("  SetUIVisibility(true) in combat: " .. combat.show)
+        local n, what = BlockedSince(combat.blocked)
+        combat.blockedText = n .. " blocked: " .. what
+        say("  " .. combat.blockedText)
+        combat.state = "done"
+    end)
+end
+
+-- 4. A Blizzard dialog while the library has the UI hidden. The probe never
+-- creates one itself (StaticPopup_Show from addon code taints the pool:
+-- MEASURED 70205, the Quit dialog then failed with ADDON_ACTION_FORBIDDEN);
+-- a friend sends a real invite. The library's hook should bring the UI back
+-- (onGameUIShown logs it) with the presentation still running; accepting
+-- must not log ADDON_ACTION_FORBIDDEN/BLOCKED.
+local window
+local Show
+local uiShown = {}           -- the onGameUIShown reasons, in order
+local function Invite()
+    say("== invite: the presentation opens with the UI hidden")
+    if not (window and window:IsShown()) then Show() end
+    say("  ask a friend for a party or guild invite. Expect 'onGameUIShown dialog', the UI back,")
+    say("  the camera still orbiting; accept it (no FORBIDDEN line), then /fp ls show to close.")
+    say("  Then open the game menu and Quit/Logout: it must work (cancel the countdown).")
+    return window:IsShown()
+end
+
+-- 5. The whole presentation.
+function Show()
+    if window and window:IsShown() then window:Hide(); return false end
+    if not window then
+        window = CreateFrame("Frame", "LibShowcaseProbeWindow", UIParent)
+        window:SetSize(260, 120)
+        window:SetPoint("RIGHT", UIParent, "RIGHT", -120, 0)
+        local bg = window:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.6)
+        local fs = window:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("CENTER")
+        fs:SetText("LibShowcase probe\nEscape or /fp ls show to close")
+        window:SetScript("OnShow", function(self)
+            local ok, why = SC:Enter(self)
+            say(("== show: Enter -> %s %s"):format(tostring(ok), tostring(why)))
+        end)
+        window:SetScript("OnHide", function()
+            SC:Exit("closed"); say("  exit")
+            C_Timer.After(1.5, Next)   -- after the restore
+        end)
+        window:Hide()
+    end
+    window:Show()
+    return window:IsShown()
+end
+
+local function TestCVar()
+    say("== testcvar: writing test_cameraOverShoulder with nothing suppressed (from ADDON code:")
+    say("  compare with a /reload control; the player's own /console write is the clean trigger)")
+    SetCVar("test_cameraOverShoulder", GetCVar("test_cameraOverShoulder") or "0")
+    say("  Did the experimental-feature popup appear? (yes = the library gave it back)")
+end
+
+-- 6. Does the dialog a re-registered experimental-CVar handler shows run
+-- tainted? Every StaticPopup_Show is watched (a post-hook, which leaves
+-- Blizzard's call secure): one frame later, each shown dialog's `which` is
+-- read with issecurevariable. StaticPopup_Show writes dialog.which, so a
+-- tainted write means the show ran tainted, and names the addon.
+local function DialogTaint(tag)
+    local lines = {}
+    local function report(i, d)
+        local sec, by = issecurevariable(d, "which")
+        local line = ("[%s] dialog %s which=%s: %s"):format(tag, tostring(i), tostring(d.which),
+            sec and "written SECURELY" or ("TAINTED by " .. tostring(by)))
+        lines[#lines + 1] = line
+        say("  " .. line)
+    end
+    for i = 1, (G("STATICPOPUP_NUMDIALOGS") or 4) do
+        local d = G("StaticPopup" .. i)
+        if type(d) == "table" and d.IsShown and d:IsShown() then report(i, d) end
+    end
+    local each = G("StaticPopup_ForEachShownDialog")
+    if #lines == 0 and type(each) == "function" then
+        each(function(d) report("pool", d) end)
+    end
+    if #lines == 0 then say(("  [%s] no shown dialog found"):format(tag)) end
+    return #lines
+end
+
+-- Every field of a frame written tainted, and by which addon. Only reads.
+local function ScanFrame(f, label)
+    local name = label or (f.GetDebugName and f:GetDebugName()) or (f.GetName and f:GetName()) or tostring(f)
+    local secure, tainted = 0, {}
+    for k in pairs(f) do
+        local ok, sec, by = pcall(issecurevariable, f, k)
+        if ok and sec then secure = secure + 1
+        elseif ok then tainted[#tainted + 1] = tostring(k) .. " (" .. tostring(by) .. ")" end
+    end
+    say(("  %s shown=%s: %d fields secure, tainted: %s"):format(name, tostring(f.IsShown and f:IsShown()),
+        secure, #tainted > 0 and table.concat(tainted, ", ") or "none"))
+    return #tainted
+end
+
+-- Any dialog, whatever shows it: 3 s after the command, the frame under the
+-- mouse and its parents are named, and every field written tainted is listed.
+local function Focus()
+    say("== focus: put the mouse on the dialog (its Accept button); reading in 3 s")
+    C_Timer.After(3, function()
+        local foci = G("GetMouseFoci") and GetMouseFoci() or {}
+        local f = foci[1]
+        if not f then say("  nothing under the mouse"); return end
+        while f and f ~= UIParent do
+            ScanFrame(f)
+            f = f.GetParent and f:GetParent()
+        end
+    end)
+end
+
+-- 7. What a presentation leaves tainted (#4 review): the library lifts
+-- GameTooltip (SetParent/SetFrameStrata/SetScale) and closes an open chat
+-- edit box (ChatEdit_DeactivateChat). Read before and after a presentation.
+local function Taint()
+    say("== taint: GameTooltip, the chat edit boxes, the chat globals")
+    local n = ScanFrame(GameTooltip, "GameTooltip")
+    for i = 1, (G("NUM_CHAT_WINDOWS") or 10) do
+        local eb = G("ChatFrame" .. i .. "EditBox")
+        if eb then n = n + ScanFrame(eb, "ChatFrame" .. i .. "EditBox") end
+    end
+    for _, g in ipairs({ "ACTIVE_CHAT_EDIT_BOX", "LAST_ACTIVE_CHAT_EDIT_BOX" }) do
+        local sec, by = issecurevariable(g)
+        say(("  %s: %s"):format(g, sec and "secure" or ("TAINTED by " .. tostring(by))))
+    end
+    return n
+end
+
+-- 8. The prompt getters the library asks before hiding the UI (in the dump by
+-- name only): log every return, so their shapes can be measured. Run it with
+-- a ready check waiting for your answer, and after answering.
+local function Prompts()
+    say("== prompts: the client's own prompt state")
+    local out = {}
+    local function show(label, fn, ...)
+        if type(fn) ~= "function" then
+            say("  " .. label .. ": ABSENT")
+            out[#out + 1] = label .. " ABSENT"
+            return
+        end
+        local r = Probe.Pack(pcall(fn, ...))
+        local vals = {}
+        for i = 2, r.n do vals[#vals + 1] = Probe.Show(r[i]) end
+        local line = ("%s -> %s%s"):format(label, r[1] and "" or "ERROR ", table.concat(vals, ", "))
+        say("  " .. line)
+        out[#out + 1] = line
+        return r[1] and r[2]
+    end
+    show('GetReadyCheckStatus("player")', G("GetReadyCheckStatus"), "player")
+    show("GetReadyCheckTimeLeft()", G("GetReadyCheckTimeLeft"))
+    show("GetLFGProposal()", G("GetLFGProposal"))
+    show("GetLFGRoleUpdate()", G("GetLFGRoleUpdate"))
+    local ids = show("GetActiveLootRollIDs()", G("GetActiveLootRollIDs"))
+    if type(ids) == "table" then
+        for _, id in ipairs(ids) do show("GetLootRollTimeLeft(" .. tostring(id) .. ")", G("GetLootRollTimeLeft"), id) end
+    end
+    return table.concat(out, "; ")
+end
+
+-- 9. hideWorldNames (#14): which name CVars the client has, their values and
+-- flags, then a presentation with them hidden, in a crowded place. Look at
+-- player, pet/minion and NPC names, guild/title lines, regional surnames and
+-- pet-owner text: which stay up? Run it again to close; the values are logged
+-- once more after the restore and must match the first list.
+-- `/fp ls names ui`: the same with the camera OFF (Acquire + HideGameUI).
+local NAME_EXTRAS = { "UnitSurnameOwn", "UnitNamePlayerGuild", "UnitNamePlayerPVPTitle",
+                      "UnitNameGuildTitle", "UnitNameForceHideMinus" }
+local namesOpen
+-- Logs each name CVar and returns { [cvar] = value or false (absent) }.
+local function LogNames(tag)
+    local values = {}
+    local function one(cvar)
+        if values[cvar] ~= nil then return end
+        local v = GetCVar(cvar)
+        values[cvar] = v == nil and false or v
+        if v == nil then say(("  [%s] %s: ABSENT"):format(tag, cvar)); return end
+        local flags = ""
+        local CV = G("C_CVar")
+        if CV and CV.GetCVarInfo then
+            local ok, _, def, _, _, locked, secure, readOnly = pcall(CV.GetCVarInfo, cvar)
+            if ok then
+                flags = (" default=%s locked=%s secure=%s readOnly=%s"):format(tostring(def), tostring(locked),
+                    tostring(secure), tostring(readOnly))
+            end
+        end
+        say(("  [%s] %s = %s%s"):format(tag, cvar, tostring(v), flags))
+    end
+    for _, cvar in ipairs(lib().WORLD_NAME_CVARS) do one(cvar) end
+    for _, cvar in ipairs(NAME_EXTRAS) do one(cvar) end
+    return values
+end
+
+-- Whether `now` holds the values saved before the presentation, and the
+-- names that differ.
+local function NamesMatch(tag)
+    local before = LibShowcaseProbeDB.namesBefore
+    if type(before) ~= "table" then return false, "no [before] list saved" end
+    local now, diff = LogNames(tag), {}
+    for cvar, v in pairs(before) do
+        if now[cvar] ~= v then diff[#diff + 1] = cvar .. " " .. tostring(v) .. " -> " .. tostring(now[cvar]) end
+    end
+    table.sort(diff)
+    return #diff == 0, #diff == 0 and "every value as before" or table.concat(diff, ", ")
+end
+
+local function NamesClose()
+    if namesOpen == "ui" then SC:Release() elseif window and window:IsShown() then window:Hide() end
+    namesOpen = nil
+    SC.opts.hideWorldNames = false
+    return true
+end
+
+local function Names(arg)
+    if namesOpen then
+        NamesClose()
+        C_Timer.After(1.5, function()
+            local same, what = NamesMatch("after")
+            say("  after the restore: " .. what .. ". Then /reload and /fp ls names list: still the same?")
+        end)
+        return true
+    end
+    if arg == "list" then LogNames("now"); return true end
+    -- A presentation already running keeps the option it entered with.
+    if window and window:IsShown() then
+        say("  a presentation is already open: close it first (/fp ls show), then /fp ls names")
+        return false, "presentation open"
+    end
+    say("== names " .. (arg == "ui" and "ui (camera OFF)" or "(presentation)") .. ": build " .. build())
+    LibShowcaseProbeDB.namesBefore = LogNames("before")
+    SC.opts.hideWorldNames = true
+    if arg == "ui" then
+        local ok, why = SC:Acquire()
+        if ok then ok, why = SC:HideGameUI() end
+        say(("  Acquire + HideGameUI -> %s %s"):format(tostring(ok), tostring(why)))
+        if not ok then
+            SC:Release()
+            SC.opts.hideWorldNames = false
+            return false, why
+        end
+        namesOpen = "ui"
+    else
+        Show()
+        -- Enter has read the option (a presentation keeps what it entered
+        -- with): off again, so a later /fp ls show or Escape leaves no trace.
+        SC.opts.hideWorldNames = false
+        if not window:IsShown() then return false, "not shown" end
+        namesOpen = "show"
+    end
+    LogNames("hidden")
+    say("  Which names, guild/title lines, surnames or pet-owner text are still drawn? Note them, then /fp ls names")
+    return true
+end
+
+-- 10. The experimental-CVar popup with its handler re-registered from addon
+-- code (MEASURED 70205: the popup then shows TAINTED by this addon).
+-- test_cameraOverShoulder is set to 0 first, while unregistered, so the
+-- player's /console test_cameraOverShoulder 0.5 always changes it.
+local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
+local function Rereg(how)
+    say("== rereg " .. tostring(how) .. ": unregister, then register the handler this way")
+    say("  " .. tostring(pcall(GameEvent.UnregisterInternalEvent, POPUP_EVENT)) .. " unregister")
+    Save("test_cameraOverShoulder")
+    SetCVar("test_cameraOverShoulder", "0")
+    if how == "closure" then          -- what the library did (r2)
+        say("  " .. tostring(pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...)
+            return GameEvent.HandleExperimentalCVarConfirmationNeeded(...)
+        end)) .. " register a closure")
+    elseif how == "direct" then       -- Blizzard's own function, no addon closure
+        say("  " .. tostring(pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT,
+            GameEvent.HandleExperimentalCVarConfirmationNeeded)) .. " register Blizzard's function")
+    else
+        how = "none"
+        say("  left unregistered")
+    end
+    say("  type: /console test_cameraOverShoulder 0.5. Popup or not? Click Disable if it shows")
+    return how
+end
+
+----------------------------------------------------------------------------
+-- Commands
+----------------------------------------------------------------------------
+
+Probe:Command("pitch", function(args) Pitch(args) end, "[off]: test_cameraDynamicPitch with centring cleared")
+Probe:Command("nudge", function(args) Nudge(args) end, "0|1: the shoulder offset without / with the CameraZoomIn(0) nudge")
+Probe:Command("combat", function() Combat() end, "arm: SetUIVisibility off and on once the next combat's lockdown is on")
+Probe:Command("invite", function() Invite() end, "open the presentation for a friend's party or guild invite")
+Probe:Command("show", function(args)
+    local delay = tonumber(args)
+    if delay then
+        say(("== show in %d s: open chat and start typing (don't send)"):format(delay))
+        C_Timer.After(delay, Show)
+    else
+        Show()
+    end
+end, "[N]: the presentation on a small window (again to close); after N seconds")
+Probe:Command("taint", function() Taint() end, "tainted fields of GameTooltip, the chat edit boxes, the chat globals")
+Probe:Command("prompts", function() Prompts() end, "every return of the prompt getters the library asks")
+Probe:Command("names", function(args) Names(args) end, "[ui|list]: hideWorldNames; again to close")
+Probe:Command("testcvar", function() TestCVar() end, "write test_cameraOverShoulder from addon code")
+Probe:Command("rereg", function(args) Rereg(args) end, "closure|direct|none: re-register the popup handler")
+Probe:Command("dialogs", function() DialogTaint("now") end, "whether each shown dialog's `which` was written securely")
+Probe:Command("focus", function() Focus() end, "3 s later: the frame under the mouse, its tainted fields")
+Probe:Command("next", function() Next() end, "the /console line to type (a changing value)")
+Probe:Command("restore", function() RestoreAll() end, "put back every CVar this probe touched")
+Probe:Command("clear", function() Probe:ClearLog(); say("log cleared") end, "empty the saved log")
+
+----------------------------------------------------------------------------
+-- Procedures (/fp steps ls <name>)
+----------------------------------------------------------------------------
+
+local blockedAtStart = 0
+local function MarkBlocked() blockedAtStart = #blockedSeen; return blockedAtStart end
+local function BlockedReport()
+    local n, what = BlockedSince(blockedAtStart)
+    say(("  blocked actions since the procedure started: %d (%s)"):format(n, what))
+    return n, what
+end
+
+Probe:Steps("pitch", {
+    title = "Dynamic pitch with centring cleared",
+    { text = "Stand somewhere open, out of combat. Write clears the centring CVars and sets test_cameraDynamicPitch 1.",
+      button = "Write", run = function() return Pitch() end },
+    { text = "Walk forward, then backward. Does the camera tilt (pitch) with the movement?", ask = true },
+    { text = "Putting every CVar the probe touched back.", auto = true, run = RestoreAll },
+})
+
+Probe:Steps("nudge", {
+    title = "The CameraZoomIn(0) nudge",
+    { text = "Out of combat, the camera a little zoomed out. Write sets the shoulder offset WITHOUT the nudge: don't touch the mouse.",
+      button = "Write", run = function() return Nudge("0") end },
+    { text = "Did the character move sideways right away, without touching the mouse?", ask = true },
+    { text = "Putting the CVars back.", auto = true, run = RestoreAll },
+    { text = "Write sets it again, WITH CameraZoomIn(0) after it: don't touch the mouse.",
+      button = "Write", run = function() return Nudge("1") end },
+    { text = "Did the character move sideways right away this time?", ask = true },
+    { text = "Putting the CVars back.", auto = true, run = RestoreAll },
+})
+
+Probe:Steps("combat", {
+    title = "SetUIVisibility in a real lockdown",
+    { text = "Out of combat, near a mob. Arm, then pull it: once InCombatLockdown() is true the probe hides the UI and shows it again 0.5 s later.",
+      button = "Arm", run = function() MarkBlocked(); return Combat() end },
+    { text = "Pull the mob and keep fighting. This step completes once both calls have run.", timeout = 300,
+      wait = function()
+          if combat.state == "done" or combat.state == "no lockdown" then
+              return true, combat.state, combat.hide, combat.show, combat.blockedText
+          end
+          return false, "combat check: " .. tostring(combat.state)
+      end },
+    { text = "Did the UI disappear and come back during the fight?", ask = true },
+    { text = "The blocked actions the test raised.", auto = true, run = BlockedReport },
+})
+
+Probe:Steps("prompts", {
+    title = "The prompt getters' shapes",
+    { text = "In a group: start a ready check (or wait for a loot roll) and leave it unanswered, then press Next." },
+    { text = "Read logs every return of the prompt getters while it waits.", button = "Read", run = Prompts },
+    { text = "Answer the ready check (or the roll), then press Next." },
+    { text = "Reading them again, with nothing waiting.", auto = true, run = Prompts },
+})
+
+Probe:Steps("invite", {
+    title = "A friend's invite while presenting",
+    { text = "Out of combat, with a friend online. Open starts the presentation: the UI hides and the camera orbits.",
+      button = "Open", run = function()
+          MarkBlocked()
+          uiShown = {}
+          if window and window:IsShown() then window:Hide() end
+          return Invite()
+      end },
+    { text = "Ask the friend for a party or guild invite. This step completes when the dialog brings the UI back.",
+      timeout = 600, wait = function()
+          for _, r in ipairs(uiShown) do if r == "dialog" then return true, "onGameUIShown dialog" end end
+          return false, "waiting for the invite's dialog"
+      end },
+    { text = "Is the UI back, with the camera still orbiting?", ask = true, screenshot = "invite: the UI back" },
+    { text = "Accept the invite. Did it work?", ask = true },
+    { text = "Close ends the presentation.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return not SC:IsActive()
+      end },
+    { text = "Open the game menu, choose Logout, then cancel the countdown. Did the countdown start?", ask = true },
+    { text = "The blocked actions since the procedure started (accepting and Logout must have raised none).",
+      auto = true, run = BlockedReport, check = function() local n, what = BlockedSince(blockedAtStart); return n == 0, what end },
+})
+
+Probe:Steps("names", {
+    title = "hideWorldNames in a crowd",
+    { text = "Go somewhere crowded (a capital, near other players and their pets), out of combat, then press Next." },
+    { text = "Hide lists the name CVars, then opens the presentation with world names hidden.",
+      button = "Hide", screenshot = "names hidden", run = function() return Names() end },
+    { text = "Is any name still drawn: a player, pet or NPC name, a guild or title line, a surname, pet-owner text? Note which.",
+      ask = true },
+    { text = "Close ends the presentation; the names come back.", button = "Close", run = NamesClose },
+    { text = "Waiting for the restore.", timeout = 15,
+      wait = function() return not SC:IsActive() and not SC:IsOwner(), "the presentation is still ending" end },
+    { text = "Reading the name CVars after the restore.", auto = true,
+      run = function() local same, what = NamesMatch("after"); return what end,
+      check = function() return NamesMatch("after (check)") end },
+    { text = "Type /reload, to see what survives it.", reload = true },
+    { text = "Reading the name CVars after the /reload.", auto = true,
+      run = function() local same, what = NamesMatch("reload"); return what end,
+      check = function() return NamesMatch("reload (check)") end },
+})
+
+Probe:Steps("rereg", {
+    title = "The experimental-CVar popup, re-registered",
+    { text = "Out of combat. Unregister leaves the popup's handler unregistered (the control).",
+      button = "Unregister", run = function() return Rereg("none") end },
+    { text = "Type /console test_cameraOverShoulder 0.5 in chat. Did the experimental-feature popup appear?", ask = true },
+    { text = "Register puts Blizzard's own handler back, from addon code.",
+      button = "Register", run = function() return Rereg("direct") end },
+    { text = "Type /console test_cameraOverShoulder 0.5 again. Did the popup appear? (Click Disable if it did.) The console says whether it ran TAINTED.",
+      ask = true },
+    { text = "Register a closure, as the library's r2 did.", button = "Register", run = function() return Rereg("closure") end },
+    { text = "Type /console test_cameraOverShoulder 0.5 once more. Did the popup appear? (Click Disable if it did.)", ask = true },
+    { text = "Putting the CVar back.", auto = true, run = RestoreAll },
+    { text = "Type /reload: it clears the handler this procedure registered.", reload = true },
+})
+
+----------------------------------------------------------------------------
+-- Load
+----------------------------------------------------------------------------
+
+Probe:OnBlocked(function(event, addon, func)
+    local line = ("%s: %s %s"):format(tostring(event), Probe.Show(addon, true), Probe.Show(func, true))
+    blockedSeen[#blockedSeen + 1] = line
+    say("  " .. line)
+end)
+
+local ev = CreateFrame("Frame")
+Probe:RegisterEvents(ev, { "ADDON_LOADED", "PLAYER_REGEN_DISABLED" })
+ev:SetScript("OnEvent", function(_, event, a1)
+    if event == "ADDON_LOADED" and a1 == ADDON then
+        Probe:Ready()
+        if type(LibShowcaseProbeDB) ~= "table" then LibShowcaseProbeDB = {} end
+        if type(LibShowcaseProbeDB.log) ~= "table" then LibShowcaseProbeDB.log = {} end
+        Probe:UseLog(LibShowcaseProbeDB.log, MAX_LOG)
+        LibShowcaseProbeDB.loads = (LibShowcaseProbeDB.loads or 0) + 1
+        local _, minor = LibStub:GetLibrary("LibShowcase-1.0", true)
+        SC = lib():New({
+            owner = "LibShowcaseProbe",
+            db = function() return LibShowcaseProbeDB end,
+            debug = function(msg) say("  [lib] " .. msg) end,
+            onGameUIShown = function(reason)
+                uiShown[#uiShown + 1] = tostring(reason)
+                say(("  onGameUIShown %s (UI shown %s, presentation active %s, owner %s)"):format(tostring(reason),
+                    tostring(UIParent:IsShown()), tostring(SC:IsActive()), tostring(SC:IsOwner())))
+            end,
+            onForcedExit = function(reason)
+                say("  onForcedExit " .. tostring(reason))
+                if reason == "ui-shown" and window then window:Hide() end
+            end,
+        })
+        hooksecurefunc("StaticPopup_Show", function(which)
+            say("StaticPopup_Show " .. tostring(which))
+            C_Timer.After(0, function() DialogTaint(tostring(which)) end)
+        end)
+        say(("loaded (%d loads), LibShowcase r%s. /fp ls for the commands, /fp steps for the procedures")
+            :format(LibShowcaseProbeDB.loads, tostring(minor)))
+    elseif event == "PLAYER_REGEN_DISABLED" and combat.state == "armed" then
+        combat.state = "waiting"
+        say(("== combat started; InCombatLockdown() in the handler = %s"):format(tostring(InCombatLockdown())))
+        RunCombatChecks(0)
+    end
+end)
+
+NS._test = { Probe = Probe, combat = function() return combat end, window = function() return window end,
+             instance = function() return SC end, uiShown = function() return uiShown end }
