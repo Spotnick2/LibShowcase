@@ -66,7 +66,7 @@ local M = {
     { "Release does not restore", { { '    st.explicit = false\n    I.Restore(inst, "release")', '    st.explicit = false\n    st.owner = nil' } } },
     -- Combat
     { "Enter allowed in combat", { { '    if InCombat() then return false, "combat" end\n    if not I.IsSupported()', '    if not I.IsSupported()' } } },
-    { "protected frames dropped in combat", { { "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred = true",
+    { "protected frames dropped in combat", { { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred = true",
                                                 "    if false then\n        rec.deferred = true" } } },
     { "a protected frame lifted in combat", { { "    if InCombat() and IsProtectedFrame(frame) then\n        I.MaybeRelease()",
                                                 "    if false then\n        I.MaybeRelease()" } } },
@@ -193,6 +193,13 @@ local M = {
     { "the owed reveal never told", { { "            I.NotifyShown(owner, reason)\n", "" } } },
     { "a blocked call read as Escape", { { "    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end\n", "" } } },
     { "the player's Escape shown again by the library", { { "    if st.uiHidden then I.ShowUI(true) end", "    if st.uiHidden then I.ShowUI() end" } } },
+    -- #21: combat has started once the client's combat flag is up
+    { "the client's combat flag ignored", {
+        { '    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true\n', "    return false\n" } } },
+    { "InCombat ignores the lockdown", {
+        { "    if Locked() then return true end\n    return type(UnitAffectingCombat)", "    return type(UnitAffectingCombat)" } } },
+    { "a drop deferred on the combat flag", {
+        { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred", "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred" } } },
     -- #40: the pull countdown and the start timers bring the UI back
     { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
     { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },

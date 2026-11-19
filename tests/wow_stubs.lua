@@ -82,6 +82,7 @@ table.insert(WoW.onReset, function()
     WoW.mounted = false
     WoW.race = { "Human", "Human", 1 }
     WoW.sex = 2
+    WoW.affecting = false
     WoW.cvars = {}
     for k, v in pairs(WoW.DEFAULT_CVARS) do WoW.cvars[k] = v end
     WoW.camera = { zoom = 4, view = 1, savedViews = {}, yaw = nil, pitchlimit = 88 }
@@ -175,15 +176,19 @@ function WoW.resetLibStub()
     rawset(_G, "LibStub", nil)
 end
 
--- Combat as the client runs it: REGEN_DISABLED handlers are still unlocked.
+-- Combat as the client runs it: REGEN_DISABLED handlers are still unlocked,
+-- but the player's combat flag is already up (MEASURED 70959, run #466:
+-- UnitAffectingCombat("player") true inside the handler; #21).
 function WoW.enterCombat()
+    WoW.affecting = true
     WoW.fire("PLAYER_REGEN_DISABLED")
     WoW.combat = true
 end
 function WoW.leaveCombat()
-    WoW.combat = false
+    WoW.combat, WoW.affecting = false, false
     WoW.fire("PLAYER_REGEN_ENABLED")
 end
+function UnitAffectingCombat(unit) return unit == "player" and WoW.affecting == true end
 
 --------------------------------------------------------------------------------
 -- Globals (each confirmed in the API dump)

@@ -99,8 +99,15 @@ owner.
   A reveal owed that way calls `onGameUIShown(reason)` then, when the UI is really back, not
   before. The player's own Escape or Alt+Z in a lockdown does show the UI: the hook then only
   follows it (no second call), and a `SetUIVisibility(true)` hook run that changed nothing (a
-  blocked call, `UIParent` still hidden) is not read as Escape. Getting the UI hidden into a
-  lockdown at all is #21.
+  blocked call, `UIParent` still hidden) is not read as Escape.
+  **"In combat" means combat has started** (MINOR 9, #21): the lockdown, or the client's own
+  `UnitAffectingCombat("player")`. MEASURED 70959 (`/fp steps ls combat`, run #466): inside
+  `PLAYER_REGEN_DISABLED`, `InCombatLockdown()` is still false but `UnitAffectingCombat("player")`
+  is already true. So `Enter`, `HideGameUI` and the lift of a protected frame, called from a
+  consumer's own `PLAYER_REGEN_DISABLED` handler that runs after the library's (the order is not
+  the library's to choose), refuse with `"combat"` and change nothing. What the lockdown alone
+  blocks (`SetUIVisibility`, a protected frame's `SetParent`) still waits for the lockdown, so
+  the library's own restore in that handler shows the UI and puts protected frames back at once.
 - **A drop is re-entrant.** Putting a frame back under a hidden `UIParent` fires its `OnHide`
   during the `SetParent` call, which may drop it again, so a record leaves the list before
   anything moves. Reparenting also sets the frame level (the new parent's + 1, 0 with no
@@ -254,10 +261,9 @@ owner.
     back to its value from before. The CVars are booleans, so that is every case.
   - **Combat:** `Enter` and `HideGameUI` refuse in combat, and combat restores at
     `PLAYER_REGEN_DISABLED` (unlocked), so the library's own paths never write the CVars in a
-    lockdown. Not guaranteed against a consumer that calls `Enter` from its own
-    `PLAYER_REGEN_DISABLED` handler after the library's (`InCombatLockdown()` is still false
-    there): the presentation then outlives the restore, camera and names alike (a gap that predates
-    this option). MEASURED 70338 (`/lsprobe names list`): every `WORLD_NAME_CVARS` entry exists, none
+    lockdown. That includes a consumer that calls `Enter` from its own `PLAYER_REGEN_DISABLED`
+    handler after the library's: since MINOR 9 (#21) it is refused there too (Guarantees,
+    Combat). MEASURED 70338 (`/lsprobe names list`): every `WORLD_NAME_CVARS` entry exists, none
     `isSecure`, `isLockedFromUser` or `isReadOnly`.
   - **The lease:** written only by the owner, inside its lease; a refused `Enter`/`HideGameUI`
     writes nothing, and another instance's stale names capture is not healed under someone else's

@@ -620,6 +620,50 @@ end
 
 
 ------------------------------------------------------------------------------
+-- #21: a consumer's own PLAYER_REGEN_DISABLED handler, run AFTER the
+-- library's (still unlocked), is refused: the client's combat flag is already
+-- up there (MEASURED 70959). The library's own restore in that handler still
+-- puts a protected frame back at once.
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    local SC = lib:New({ owner = "A" })
+    local secure = newWindow("MEDIUM"); secure._protected = true
+    local results = {}
+    local consumer = CreateFrame("Frame")
+    consumer:RegisterEvent("PLAYER_REGEN_DISABLED")
+    consumer:SetScript("OnEvent", function()
+        if results.enter then return end
+        results.enter = { SC:Enter(newWindow()) }
+        results.hide = { SC:HideGameUI(newWindow()) }
+        results.lift = { SC:Lift(secure) }
+    end)
+    local calls = #WoW.calls
+    WoW.enterCombat()
+    eq(results.enter[1] == false and results.enter[2], "combat", "Enter from a later REGEN_DISABLED handler: false, \"combat\"")
+    eq(results.hide[1] == false and results.hide[2], "combat", "HideGameUI there: false, \"combat\"")
+    eq(results.lift[1] == false and results.lift[2], "combat", "Lift of a protected frame there: false, \"combat\"")
+    check(UIParent:IsShown() and not SC:IsActive() and not SC:IsGameUIHidden(), "  nothing presents, the UI is up")
+    eq(#WoW.calls, calls, "  no camera call was made: " .. table.concat(WoW.calls, ", ", calls + 1))
+    eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  no CVar written")
+    eq(secure:GetParent(), UIParent, "  the frame not lifted")
+    check(not SC:IsOwner(), "  no lease held")
+    consumer:UnregisterEvent("PLAYER_REGEN_DISABLED")
+    WoW.leaveCombat()
+
+    -- The library's own restore in that same handler: a protected frame
+    -- lifted before the fight goes back synchronously, before the lockdown.
+    check(SC:Enter(secure), "presenting with a protected window")
+    WoW.enterCombat()
+    eq(secure:GetParent(), UIParent, "combat start puts the protected window back at once")
+    check(not SC:IsLifted(secure) and not SC:IsOwner(), "  nothing deferred, the lease given back")
+    eq(#WoW.blocked, 0, "  nothing blocked")
+    WoW.leaveCombat()
+    check(SC:Enter(newWindow()), "after the fight, Enter works again")
+    SC:ForceRestore()
+end
+
+------------------------------------------------------------------------------
 -- #42: SetUIVisibility from addon code is BLOCKED in a lockdown (MEASURED
 -- 70959). The UI hidden going into a lockdown (the #21 path: a consumer's
 -- PLAYER_REGEN_DISABLED handler after the library's) must not be "shown" by
