@@ -322,7 +322,7 @@ local function Prompts()
         end
         local r = Probe.Pack(pcall(fn, ...))
         local vals = {}
-        for i = 2, r.n do vals[#vals + 1] = Probe.Show(r[i]) end
+        for i = 2, r.n do vals[#vals + 1] = type(r[i]) == "table" and Probe.Describe(r[i]) or Probe.Show(r[i]) end
         local line = ("%s -> %s%s"):format(label, r[1] and "" or "ERROR ", table.concat(vals, ", "))
         say("  " .. line)
         out[#out + 1] = line

@@ -170,7 +170,7 @@ end
 --------------------------------------------------------------------------------
 
 -- Prompt getters: in the dump by NAME only (the _G walk), no signature. The
--- shapes are Retail's, UNMEASURED on Forever (/fp steps ls prompts measures them).
+-- shapes are Retail's, MEASURED on 70959 (/fp steps ls prompts; docs/DESIGN.md).
 function GetReadyCheckStatus(unit)
     return unit == "player" and WoW.readyCheck and WoW.readyCheck.status or nil
 end

@@ -131,6 +131,7 @@ WoW.lootRolls = { [7] = 25000 }
 fp("ls prompts")
 check(logHas('GetReadyCheckStatus("player") -> "waiting"'), "prompts: every getter's returns")
 check(logHas("GetLootRollTimeLeft(7) -> 25000"), "  one per active roll")
+check(not logHas("GetActiveLootRollIDs() -> table:"), "  the roll IDs shown as their contents, not an address")
 WoW.readyCheck, WoW.lootRolls = nil, {}
 
 WoW.cvars.UnitNameOwn = "1"
