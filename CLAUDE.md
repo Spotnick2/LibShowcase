@@ -70,7 +70,7 @@ showed the popup `TAINTED by` the addon (`issecurevariable(dialog, "which")`).
 
 ## Upgrade rules (several addons ship copies; the newest one wins, and it may not be yours)
 
-These follow `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
+These follow `C:\Projects\WoW\References\Docs\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
 
 - **Dispatch at call time.** Instance methods live in `lib.methods` (the instances' shared
   `__index`, a plain table) as `function(self, ...) return lib.impl[name](self, ...) end`. The
@@ -129,10 +129,10 @@ pwsh tests\run.ps1                                               # luac -p + eve
 
 ## References
 
-- `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
-- `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
+- `C:\Projects\WoW\References\Docs\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
+- `C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
   "A CVar that does nothing may be obeyed and then overruled").
-- `C:\Projects\WoW\References\forever-api-1.60.1.70338.md`: the API dump (MEASURED notes name the build they were taken on).
+- `C:\Projects\WoW\References\Forever\api\forever-api-1.60.1.70338.md`: the API dump (MEASURED notes name the build they were taken on).
 - `C:\Projects\WoW\AltStable` (`docs/forever-api-notes.md`, CVars section) and
   `C:\Projects\WoW\PortalRoulette\docs\FOREVER-PROBE.md`: where the camera facts were measured.
 
