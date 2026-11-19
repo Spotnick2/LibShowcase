@@ -773,6 +773,28 @@ check(tostring(rec.results[15].detail):find("not measured", 1, true), "  which s
 rawset(_G, "C_InputInterfaceStyle", nil)
 WoW.sex = 2
 
+-- #59: the framing candidates on a female Skyborne (UnitRace's third return:
+-- 95). Each writes zoom * factor1 + factor2 and takes a screenshot.
+WoW.race, WoW.sex = { "High Order Skyborne", "Skyborne", 95 }, 3
+fp("steps ls framing")
+rec = record("framing")
+local shotsF = shots
+S.Run(); ticks(0.1, 20); S.Poll()
+check(tostring(rec.results[2].detail):find("race Skyborne (95), sex 3, zoom", 1, true), "framing 2: the race, sex and zoom read once settled")
+local z = LibStub("LibShowcase-1.0").state.cam.enterToZoom
+S.Run(); shoot()
+check(math.abs(tonumber(WoW.cvars.test_cameraOverShoulder) - (z * 0.361 - 0.1654)) < 1e-6, "framing 3: A, today's pair")
+S.Run(); shoot()
+check(math.abs(tonumber(WoW.cvars.test_cameraOverShoulder) - (z * 0.3177 + 0.0683)) < 1e-6, "framing 4: B, the Blood Elf pair")
+S.Run(); shoot(); S.Run(); shoot()
+check(math.abs(tonumber(WoW.cvars.test_cameraOverShoulder) - (z * 0.329 + 0.025)) < 1e-6, "framing 6: D, the Night Elf pair")
+eq(shots, shotsF + 4, "  a screenshot each")
+S.Answer(true)
+S.Run(); untilEnded()
+eq(rec.status, "done", "the framing procedure finishes")
+eq(WoW.cvars.test_cameraOverShoulder, "0", "  the offset back with the presentation")
+WoW.race, WoW.sex = { "Human", "Human", 1 }, 2
+
 -- #39's premise: one full turn timed at 90 and at 360.
 WoW.cvars.cameraYawMoveSpeed = "180"
 fp("steps ls orbitspeed")

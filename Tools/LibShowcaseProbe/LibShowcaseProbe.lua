@@ -1548,6 +1548,65 @@ Probe:Steps("orbitspeed", {
       run = function() local ok, line = OrbitVerdict(); RestoreYaw(); return ok, line end },
 })
 
+-- 17. #59: a race the shoulder tables lack. Skyborne (95 and 96, Forever's
+-- own) is built on the Blood Elf rig (ChrModel 218/219: the Blood Elf
+-- skeletons and camera offsets, CustomizeScale 1.0 instead of 1.1/1.2,
+-- forever-chrmodel-1.60.1.70959.csv), but races on one rig don't share a
+-- pair in the reference table (Void Elf differs from Blood Elf). So the
+-- candidates are shown one by one on the settled presentation, at its own
+-- zoom, a screenshot each, and the tester picks.
+local FRAMING_CANDIDATES = {
+    [3] = { { "A", "today's (the default pair)", 0.361, -0.1654 }, { "B", "Blood Elf", 0.3177, 0.0683 },
+            { "C", "Void Elf", 0.3353, -0.02 }, { "D", "Night Elf", 0.329, 0.025 } },
+    [2] = { { "A", "today's (the default pair, Blood Elf's)", 0.361, -0.1654 }, { "B", "Void Elf", 0.3556, -0.1038 },
+            { "C", "Night Elf", 0.30, -0.0404 }, { "D", "Nightborne", 0.3067, -0.02 } },
+}
+local framing = {}
+
+local function FramingSettled()
+    local cam = type(lib().state) == "table" and lib().state.cam
+    if SC:IsActive() and type(cam) == "table" and cam.mode == nil then
+        framing.zoom = tonumber(cam.cfg and cam.cfg.shoulderRef) or tonumber(cam.enterToZoom) or tonumber(GetCameraZoom())
+        local _, raceFile, raceID = UnitRace("player")
+        framing.sex = G("UnitSex") and UnitSex("player") == 3 and 3 or 2
+        local line = ("race %s (%s), sex %d, zoom %.2f, offset %s"):format(tostring(raceFile), tostring(raceID),
+            framing.sex, framing.zoom or -1, tostring(GetCVar("test_cameraOverShoulder")))
+        say("  framing: " .. line)
+        return true, line
+    end
+    return false, "the camera is still moving in"
+end
+
+local function FramingTry(i)
+    local c = FRAMING_CANDIDATES[framing.sex or 2][i]
+    if not (SC:IsActive() and framing.zoom) then error("the presentation isn't open: Back to Open", 0) end
+    local offset = framing.zoom * c[3] + c[4]
+    lib().SuppressExperimentalCVarPopup()
+    pcall(SetCVar, "test_cameraOverShoulder", offset)
+    local line = ("%s: %s pair (%.4f, %.4f) -> offset %.3f (reads %s)"):format(c[1], c[2], c[3], c[4], offset,
+        tostring(GetCVar("test_cameraOverShoulder")))
+    say("  framing: " .. line)
+    return line
+end
+
+local function FramingStep(i)
+    local letter = ({ "A", "B", "C", "D" })[i]
+    return { text = ("%s shows candidate %s (a screenshot follows). Note how the character sits."):format(letter, letter),
+             button = letter, run = function() return FramingTry(i) end, screenshot = "framing " .. letter }
+end
+
+Probe:Steps("framing", {
+    title = "The shoulder pair for a race the tables lack (#59)",
+    { text = "On the character to frame (a Skyborne one), out of combat, somewhere open. Open starts a presentation.",
+      button = "Open", run = OpenOrThrow },
+    { text = "Waiting for the camera to settle.", timeout = 15, wait = FramingSettled },
+    FramingStep(1), FramingStep(2), FramingStep(3), FramingStep(4),
+    { text = "Which candidate framed the character best: to one side and fully in view? Write its letter (A, B, C or D) in the Note box, then answer: was one clearly the best?",
+      ask = true },
+    { text = "Close ends the presentation (the offset goes back with it).", button = "Close", run = Close },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+})
+
 Probe:Steps("rereg", {
     title = "The experimental-CVar popup, re-registered",
     { text = "Out of combat. Unregister leaves the popup's handler unregistered (the control).",
