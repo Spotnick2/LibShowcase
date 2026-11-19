@@ -37,7 +37,7 @@
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
 --   names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus |
---   next | restore | clear
+--   next | restore | clear | tempback (after a stopped tempcvar run)
 -- Always on: every StaticPopup_Show logs, a frame later, whether each shown
 -- dialog's `which` was written securely (issecurevariable) or TAINTED, and by
 -- which addon. The host's baseline logs every ADDON_ACTION_BLOCKED /
@@ -197,6 +197,7 @@ end
 local window
 local Show
 local uiShown = {}           -- the onGameUIShown reasons, in order
+local forcedSeen = {}        -- reason -> true for each onForcedExit since the last trial's Open
 local namesOpen              -- "show" or "ui" while a names check holds the names hidden
 local function InviteReady()
     if not (SC:IsActive() and SC:IsOwner()) then
@@ -760,7 +761,7 @@ end
 local function FollowBefore()
     local snap, n = CameraCVars(), 0
     for _ in pairs(snap) do n = n + 1 end
-    FollowDB().before = snap
+    FollowDB().before, FollowDB().trial = snap, nil
     local line = ("before: %d camera CVars; cameraView %s, cameraSmoothStyle %s, KeepCentered %s, ReduceUnexpected %s")
         :format(n, tostring(snap.cameraView), tostring(snap.cameraSmoothStyle),
             tostring(snap.CameraKeepCharacterCentered), tostring(snap.CameraReduceUnexpectedMovement))
@@ -768,10 +769,12 @@ local function FollowBefore()
     return line
 end
 
--- Every camera CVar that differs from the "before" snapshot, logged one by
--- one; the step's detail lists them.
+-- Every camera CVar that differs from the trial's snapshot (taken when its
+-- control passed; the start's "before" if none), logged one by one; the
+-- step's detail lists them.
 local function FollowDiff(tag)
-    local before = FollowDB().before
+    local db = FollowDB()
+    local before = type(db.trial) == "table" and db.trial or db.before
     if type(before) ~= "table" then return false, "no before snapshot: start the procedure again" end
     local now, changed = CameraCVars(), {}
     local names = {}
@@ -802,15 +805,40 @@ end
 -- Each trial starts from a camera that follows: the control just before it
 -- said yes (Codex, PR #52: run #468's control failed, and every later trial
 -- then started with the symptom already there).
+-- A passing control also snapshots the camera as it is then: the trial is
+-- compared with the camera that followed, not with the start's, which may be
+-- the one the tester had to fix (Codex, PR #52). The start's "before" stays
+-- for the final cleanup.
 local followOK = false
-local function FollowControlLeft(outcome) followOK = outcome == "yes" end
+local function FollowControlLeft(outcome)
+    followOK = outcome == "yes"
+    FollowDB().trial = followOK and CameraCVars() or nil
+end
+
+-- The trial's Open: the presentation must start with the UI hidden (a dialog
+-- or prompt up would keep it shown, and Escape could not end it). The passing
+-- control is used up only once that worked, so a refused Open can be retried.
 local function FollowOpen()
     if not followOK then
         error("the camera did not follow before this trial, so it can't be measured: Back to the control"
             .. " once it follows, or Stop", 0)
     end
+    OpenOrThrow()
+    if not SC:IsGameUIHidden() then
+        if window and window:IsShown() then window:Hide() end
+        error("the presentation kept the UI shown (a dialog or prompt is up): close it, then Retry", 0)
+    end
+    forcedSeen = {}
     followOK = false   -- one trial per control
-    return OpenOrThrow()
+    return true, "presenting, the UI hidden"
+end
+
+-- The trial ended the way it was meant to (onForcedExit's reason), or its
+-- comparison is refused: the step stays, Back to try the trial again.
+local function FollowEndedBy(reason, tag)
+    if not forcedSeen[reason] then
+        error(("the presentation did not end by %s: Back to the control and try the trial again"):format(tag), 0)
+    end
 end
 
 -- Every camera CVar and the view back to "before", read back: a mismatch
@@ -860,21 +888,21 @@ Probe:Steps("follow", {
     { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
     { text = "Close ends it normally.", button = "Close", run = Close },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
-    { text = "Comparing the camera CVars with before.", auto = true, run = function() return FollowDiff("exit") end },
+    { text = "Comparing the camera CVars with the trial's start.", auto = true, run = function() return FollowDiff("exit") end },
     { text = "After a normal exit: " .. FOLLOW_ASK, ask = true },
     -- 2. Escape, from the camera as it was.
     { text = "Reset puts every camera CVar and the view back as at the start.", button = "Reset", run = FollowRestore },
     { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
     { text = "Open starts it again.", button = "Open", run = FollowOpen },
     { text = "Press Escape once: the UI comes back and the presentation ends.", timeout = 120, wait = PresentationEnded },
-    { text = "Comparing.", auto = true, run = function() return FollowDiff("escape") end },
+    { text = "Comparing.", auto = true, run = function() FollowEndedBy("ui-shown", "Escape"); return FollowDiff("escape") end },
     { text = "After Escape: " .. FOLLOW_ASK, ask = true },
     -- 3. Combat.
     { text = "Reset puts the camera back again.", button = "Reset", run = FollowRestore },
     { text = "Go next to a mob you can fight. " .. FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
     { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
     { text = "Pull the mob: combat ends the presentation. Finish the fight.", timeout = 300, wait = PresentationEnded },
-    { text = "Out of combat now? Comparing.", auto = true, run = function() return FollowDiff("combat") end },
+    { text = "Out of combat now? Comparing.", auto = true, run = function() FollowEndedBy("combat", "combat"); return FollowDiff("combat") end },
     { text = "After combat: " .. FOLLOW_ASK, ask = true },
     -- 4. A /reload mid-presentation: its PLAYER_LOGOUT restores and clears
     -- the capture, so this is the logout path, not the login heal.
@@ -994,9 +1022,16 @@ local function TempStart()
     -- A temp already on would be taken for the stored value, and the Base
     -- write would replace the real one unseen (Codex, PR #52).
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    -- The start values stay until a verified put-back clears them: a run
+    -- stopped after Base keeps the player's real ones for the next run, or
+    -- for /fp ls tempback (Codex, PR #52).
     local db = TempDB()
-    db.orig = {}
-    for _, cvar in ipairs(TEMP_CVARS) do db.orig[cvar] = GetCVar(cvar) end
+    if type(db.orig) == "table" then
+        say("  keeping an earlier run's start values (its put-back never ran): /fp ls tempback restores them")
+    else
+        db.orig = {}
+        for _, cvar in ipairs(TEMP_CVARS) do db.orig[cvar] = GetCVar(cvar) end
+    end
     local pad = G("C_GamePad") and C_GamePad.IsEnabled
     local okPad, enabled = false, nil
     if type(pad) == "function" then okPad, enabled = pcall(pad) end
@@ -1049,6 +1084,7 @@ local function TempPutBack()
     end
     local line = TempRead("put back")
     if #wrong > 0 then error("not put back: " .. table.concat(wrong, "; ") .. ". Retry", 0) end
+    TempDB().orig = nil
     return true, line
 end
 
@@ -1087,6 +1123,13 @@ Probe:Steps("tempcvar", {
     { text = "Reading after the /reload.", auto = true, run = function() return TempRead("reload") end },
     { text = "Putting both CVars back as they were at the start.", auto = true, run = TempPutBack },
 })
+
+-- After a tempcvar run that was stopped before its last step.
+Probe:Command("tempback", function()
+    if type(TempDB().orig) ~= "table" then say("tempback: nothing to put back"); return end
+    local ok, a, b = pcall(TempPutBack)   -- ok, true, line; or false, the error
+    say("tempback: " .. tostring(ok and b or a))
+end, "put the centring CVars back after a stopped tempcvar run")
 
 Probe:Steps("rereg", {
     title = "The experimental-CVar popup, re-registered",
@@ -1134,6 +1177,7 @@ ev:SetScript("OnEvent", function(_, event, a1)
             end,
             onForcedExit = function(reason)
                 say("  onForcedExit " .. tostring(reason))
+                forcedSeen[tostring(reason)] = true
                 if reason == "ui-shown" and window then window:Hide() end
             end,
         })
