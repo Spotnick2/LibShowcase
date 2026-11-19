@@ -12,7 +12,9 @@ takes PortalRoulette's `Camera/CameraMode.lua` extras as opt-in options.
 Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\` through
 `.pkgmeta` externals, and LibStub runs the newest copy loaded.
 
-**Status (2026-10-10): `r4` released** (MINOR 4, annotated tag on `195d714`: opt-in
+**Status (2026-11-19): `r10` released** (MINOR 10, annotated tag on `1e2d026`: combat
+lockdown, countdowns, orbit speed, female framing, combat start, gamepad mode; #42, #40, #39,
+#38, #21, #54; MINOR 5 to 9 were never tagged on their own. r4 on `195d714`, opt-in
 `hideWorldNames`, #14/#15; r3 on `283914d`; r1 and r2 were never tagged), public at
 github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones externals
 anonymously). MIT. Consumers (the `.pkgmeta` pin): **AltStable** (`tag: r3`), **PortalRoulette**
@@ -99,7 +101,7 @@ consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\WoW\Lib
 `pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
 `pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
 whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
-(r3: #10; r4: #16), and publish a GitHub Release for the tag (#13):
+(r3: #10; r4: #16; r10: #60), and publish a GitHub Release for the tag (#13):
 `gh release create rN --verify-tag --latest --title "rN: <what changed>" --notes-file <notes>`.
 The notes are written by hand, not generated: **the MINOR** first, what changed, whether a
 consumer must do anything (nothing / pin `tag: rN` **and raise its `NEEDS_MINOR`** to use what is
