@@ -402,6 +402,12 @@ do
     eq(lib.ShoulderOffsetFor("Human", 2.1), 2.1 * 0.3283 - 0.02, "  and without a sex, as before")
     eq(lib.ShoulderOffsetFor(6, 4, nil, 3), 4 * 0.2427 - 0.1867, "female Tauren, by race ID")
     eq(lib.ShoulderOffsetFor("HighOrderSkyborne", 2, nil, 3), 2 * 0.361 - 0.1654, "an unknown race, female: the default")
+    -- #59: Forever's Skyborne (95, 96; race file "Skyborne") takes the Blood
+    -- Elf pairs: the same models' rig.
+    for _, race in ipairs({ 95, 96, "Skyborne" }) do
+        eq(lib.ShoulderOffsetFor(race, 2.2, nil, 3), 2.2 * 0.3177 + 0.0683, "Skyborne " .. race .. ", female: the Blood Elf female pair")
+        eq(lib.ShoulderOffsetFor(race, 2.2, nil, 2), 2.2 * 0.361 - 0.1654, "  male: the Blood Elf male pair")
+    end
     eq(lib.ShoulderOffsetFor(nil, 8, true, 3), 8 * 1.2495 - 4.0, "mounted: one pair for both")
     eq(lib.ShoulderOffsetFor(99, 2, nil, 3), 2 * 0.361 - 0.1654, "an unknown race ID, female: the default")
     eq(lib.ShoulderOffsetFor(99, 2), 2 * 0.361 - 0.1654, "  and male, as before")

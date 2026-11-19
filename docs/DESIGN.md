@@ -316,7 +316,13 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 - A female character's shoulder offset uses the female pair (`lib.FEMALE_SHOULDER_FACTORS`, #38);
   AltStable used the male column for everyone. `tests/test_parity.lua` runs a male character.
   Seen in game (70959, release check run #427): a female Night Elf framed to one side, in view.
-  A race the tables lack (Forever's Skyborne, 95: run #488) takes the default pair (#59).
+  Forever's own Skyborne (95 High Order, 96 Windshaper; race file `Skyborne`) takes the Blood
+  Elf pairs since MINOR 11 (#59): its models (ChrModel 218/219) use the Blood Elf skeletons and
+  camera data, only `CustomizeScale` differs (1.0 against 1.1/1.2; forever-chrmodel-1.60.1.70959).
+  Measured (`/fp steps ls framing`, run #511, a female at zoom 2.2): today's default, the Blood
+  Elf, Void Elf and Night Elf pairs put her centre between 34% and 38% of the width, and no
+  candidate was clearly better; the Blood Elf one follows the rig. A race the tables still lack
+  takes the default pair.
 - The orbit is scaled by the player's `cameraYawMoveSpeed` (#39); AltStable scaled only the entry
   turn, so its orbit sped up or slowed down with the setting. The same at the default 180, where
   `tests/test_parity.lua` runs.
