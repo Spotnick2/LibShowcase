@@ -100,6 +100,11 @@ local function BlockedSince(from)
     return #t, #t > 0 and table.concat(t, "; ") or "none"
 end
 
+-- One baseline for "blocked since the check started": set by the combat arm
+-- and by each procedure that reports blocked actions.
+local blockedAtStart = 0
+local function MarkBlocked() blockedAtStart = #blockedSeen; return blockedAtStart end
+
 -- 1. Dynamic pitch, with the centring CVars that cancelled the shoulder offset cleared.
 local function Pitch(arg)
     if arg == "off" then return RestoreAll() end
@@ -132,7 +137,8 @@ end
 -- combat.state: "armed", "waiting", "half" (hidden, not shown yet), "done".
 local combat = {}
 local function Combat()
-    combat = { state = "armed", blocked = #blockedSeen }
+    combat = { state = "armed" }
+    MarkBlocked()
     say("== combat: armed. Pull something; results log when the lockdown is on")
     return "armed"
 end
@@ -156,7 +162,7 @@ local function RunCombatChecks(tries)
         local ok2, err2 = pcall(SetUIVisibility, true)
         combat.show = ("pcall %s %s, UIParent shown %s"):format(tostring(ok2), tostring(err2), tostring(UIParent:IsShown()))
         say("  SetUIVisibility(true) in combat: " .. combat.show)
-        local n, what = BlockedSince(combat.blocked)
+        local n, what = BlockedSince(blockedAtStart)
         combat.blockedText = n .. " blocked: " .. what
         say("  " .. combat.blockedText)
         combat.state = "done"
@@ -172,6 +178,7 @@ end
 local window
 local Show
 local uiShown = {}           -- the onGameUIShown reasons, in order
+local namesOpen              -- "show" or "ui" while a names check holds the names hidden
 local function Invite()
     say("== invite: the presentation opens with the UI hidden")
     if not (window and window:IsShown()) then Show() end
@@ -181,8 +188,10 @@ local function Invite()
     return window:IsShown()
 end
 
--- 5. The whole presentation.
-function Show()
+-- 5. The whole presentation. `hint`: once it closes, log the /console line
+-- to type (the one-off `/fp ls show` check: it must raise no popup). The
+-- procedures that open it don't want that line in the middle of their steps.
+function Show(hint)
     if window and window:IsShown() then window:Hide(); return false end
     if not window then
         window = CreateFrame("Frame", "LibShowcaseProbeWindow", UIParent)
@@ -198,12 +207,15 @@ function Show()
             local ok, why = SC:Enter(self)
             say(("== show: Enter -> %s %s"):format(tostring(ok), tostring(why)))
         end)
-        window:SetScript("OnHide", function()
+        window:SetScript("OnHide", function(self)
             SC:Exit("closed"); say("  exit")
-            C_Timer.After(1.5, Next)   -- after the restore
+            -- Closed by Escape too: a names check on this window is over.
+            if namesOpen == "show" then namesOpen = nil end
+            if self.hint then C_Timer.After(1.5, Next) end   -- after the restore
         end)
         window:Hide()
     end
+    window.hint = hint and true or nil
     window:Show()
     return window:IsShown()
 end
@@ -326,7 +338,6 @@ end
 -- `/fp ls names ui`: the same with the camera OFF (Acquire + HideGameUI).
 local NAME_EXTRAS = { "UnitSurnameOwn", "UnitNamePlayerGuild", "UnitNamePlayerPVPTitle",
                       "UnitNameGuildTitle", "UnitNameForceHideMinus" }
-local namesOpen
 -- Logs each name CVar and returns { [cvar] = value or false (absent) }.
 local function LogNames(tag)
     local values = {}
@@ -371,20 +382,18 @@ local function NamesClose()
     return true
 end
 
-local function Names(arg)
-    if namesOpen then
-        NamesClose()
-        C_Timer.After(1.5, function()
-            local same, what = NamesMatch("after")
-            say("  after the restore: " .. what .. ". Then /reload and /fp ls names list: still the same?")
-        end)
-        return true
-    end
-    if arg == "list" then LogNames("now"); return true end
-    -- A presentation already running keeps the option it entered with.
-    if window and window:IsShown() then
-        say("  a presentation is already open: close it first (/fp ls show), then /fp ls names")
-        return false, "presentation open"
+-- Hides the names: `arg` "ui" with the camera OFF, else a presentation.
+-- Refused while anything holds the screen (a names check, a presentation,
+-- even one still ending, or another lease): the [before] list would read
+-- names already hidden, and a running presentation keeps the option it
+-- entered with. Returns ok, why.
+local function NamesStart(arg)
+    local busy = namesOpen and "a names check is open (/fp ls names closes it)"
+        or (window and window:IsShown()) and "a presentation is open (/fp ls show closes it)"
+        or (SC:IsActive() or SC:IsOwner()) and "the presentation is still ending: try again in a moment"
+    if busy then
+        say("  " .. busy)
+        return false, busy
     end
     say("== names " .. (arg == "ui" and "ui (camera OFF)" or "(presentation)") .. ": build " .. build())
     LibShowcaseProbeDB.namesBefore = LogNames("before")
@@ -410,6 +419,20 @@ local function Names(arg)
     LogNames("hidden")
     say("  Which names, guild/title lines, surnames or pet-owner text are still drawn? Note them, then /fp ls names")
     return true
+end
+
+-- The one-off command: hide, or (again) close and compare with [before].
+local function Names(arg)
+    if arg == "list" then LogNames("now"); return true end
+    if namesOpen then
+        NamesClose()
+        C_Timer.After(1.5, function()
+            local _, what = NamesMatch("after")
+            say("  after the restore: " .. what .. ". Then /reload and /fp ls names list: still the same?")
+        end)
+        return true
+    end
+    return NamesStart(arg)
 end
 
 -- 10. The experimental-CVar popup with its handler re-registered from addon
@@ -449,9 +472,9 @@ Probe:Command("show", function(args)
     local delay = tonumber(args)
     if delay then
         say(("== show in %d s: open chat and start typing (don't send)"):format(delay))
-        C_Timer.After(delay, Show)
+        C_Timer.After(delay, function() Show(true) end)
     else
-        Show()
+        Show(true)
     end
 end, "[N]: the presentation on a small window (again to close); after N seconds")
 Probe:Command("taint", function() Taint() end, "tainted fields of GameTooltip, the chat edit boxes, the chat globals")
@@ -469,8 +492,22 @@ Probe:Command("clear", function() Probe:ClearLog(); say("log cleared") end, "emp
 -- Procedures (/fp steps ls <name>)
 ----------------------------------------------------------------------------
 
-local blockedAtStart = 0
-local function MarkBlocked() blockedAtStart = #blockedSeen; return blockedAtStart end
+-- A wait step: the exit animation is over and the lease given back. The
+-- detail says which, so a completed wait doesn't read "still ending".
+local function PresentationEnded()
+    if not SC:IsActive() and not SC:IsOwner() then return true, "the presentation ended" end
+    return false, "the presentation is still ending"
+end
+
+-- The names compared with [before]: read (and logged) once by the step's
+-- run; its check gives that verdict.
+local namesVerdict = { false, "not read" }
+local function NamesRead(tag)
+    namesVerdict = { NamesMatch(tag) }
+    return namesVerdict[2]
+end
+local function NamesVerdict() return namesVerdict[1], namesVerdict[2] end
+
 local function BlockedReport()
     local n, what = BlockedSince(blockedAtStart)
     say(("  blocked actions since the procedure started: %d (%s)"):format(n, what))
@@ -500,14 +537,16 @@ Probe:Steps("nudge", {
 Probe:Steps("combat", {
     title = "SetUIVisibility in a real lockdown",
     { text = "Out of combat, near a mob. Arm, then pull it: once InCombatLockdown() is true the probe hides the UI and shows it again 0.5 s later.",
-      button = "Arm", run = function() MarkBlocked(); return Combat() end },
+      button = "Arm", run = Combat },
+    -- "no lockdown" (the poll gave up after 10 s) ends the wait too, as a FAIL.
     { text = "Pull the mob and keep fighting. This step completes once both calls have run.", timeout = 300,
       wait = function()
           if combat.state == "done" or combat.state == "no lockdown" then
               return true, combat.state, combat.hide, combat.show, combat.blockedText
           end
           return false, "combat check: " .. tostring(combat.state)
-      end },
+      end,
+      check = function() return combat.state == "done", combat.state end },
     { text = "Did the UI disappear and come back during the fight?", ask = true },
     { text = "The blocked actions the test raised.", auto = true, run = BlockedReport },
 })
@@ -538,30 +577,37 @@ Probe:Steps("invite", {
     { text = "Accept the invite. Did it work?", ask = true },
     { text = "Close ends the presentation.", button = "Close", run = function()
           if window and window:IsShown() then window:Hide() end
-          return not SC:IsActive()
+          return "closing"
       end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     { text = "Open the game menu, choose Logout, then cancel the countdown. Did the countdown start?", ask = true },
     { text = "The blocked actions since the procedure started (accepting and Logout must have raised none).",
       auto = true, run = BlockedReport, check = function() local n, what = BlockedSince(blockedAtStart); return n == 0, what end },
 })
 
 Probe:Steps("names", {
+    -- rev 2 (#32): Hide, the wait and the reads changed functions only, so a
+    -- run started before them is stopped at /reload instead of resumed.
+    rev = 2,
     title = "hideWorldNames in a crowd",
     { text = "Go somewhere crowded (a capital, near other players and their pets), out of combat, then press Next." },
     { text = "Hide lists the name CVars, then opens the presentation with world names hidden.",
-      button = "Hide", screenshot = "names hidden", run = function() return Names() end },
+      -- A refusal (something still open or ending) is an error: logged, the
+      -- step stays, and Retry tries again.
+      button = "Hide", screenshot = "names hidden", run = function()
+          local ok, why = NamesStart()
+          if not ok then error(why, 0) end
+          return ok
+      end },
     { text = "Is any name still drawn: a player, pet or NPC name, a guild or title line, a surname, pet-owner text? Note which.",
       ask = true },
     { text = "Close ends the presentation; the names come back.", button = "Close", run = NamesClose },
-    { text = "Waiting for the restore.", timeout = 15,
-      wait = function() return not SC:IsActive() and not SC:IsOwner(), "the presentation is still ending" end },
+    { text = "Waiting for the restore.", timeout = 15, wait = PresentationEnded },
     { text = "Reading the name CVars after the restore.", auto = true,
-      run = function() local same, what = NamesMatch("after"); return what end,
-      check = function() return NamesMatch("after (check)") end },
+      run = function() return NamesRead("after") end, check = NamesVerdict },
     { text = "Type /reload, to see what survives it.", reload = true },
     { text = "Reading the name CVars after the /reload.", auto = true,
-      run = function() local same, what = NamesMatch("reload"); return what end,
-      check = function() return NamesMatch("reload (check)") end },
+      run = function() return NamesRead("reload") end, check = NamesVerdict },
 })
 
 Probe:Steps("rereg", {

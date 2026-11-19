@@ -11,6 +11,7 @@ local root = foreverProbeRoot("test_probe")
 -- What the host and the probe read beyond the shared stub (the host reads
 -- every client API through rawget, so the rest may stay absent).
 local errors, shots = {}, 0
+local expectedErrors = 0      -- errors a scenario below raises on purpose
 rawset(_G, "SlashCmdList", {})
 rawset(_G, "GetBuildInfo", function() return "1.60.1", "70959", "Nov 1 2026", 16001 end)
 rawset(_G, "geterrorhandler", function() return function(e) errors[#errors + 1] = tostring(e) end end)
@@ -210,6 +211,18 @@ WoW.leaveCombat()
 S.Answer(true)
 eq(rec.status, "done", "the combat procedure finishes")
 
+-- No lockdown within the poll (10 s): the wait ends, saved as a FAIL.
+fp("steps ls combat")
+rec = record("combat")
+S.Run()
+WoW.fire("PLAYER_REGEN_DISABLED")             -- combat starts, the lockdown never comes
+WoW.advance(11)
+S.Poll()
+eq(rec.results[2].check, "FAIL", "combat 2: no lockdown is a FAIL, not a completed measurement")
+check(tostring(rec.results[2].checkDetail):find("no lockdown", 1, true), "  saying why")
+S.Answer(false)
+eq(rec.status, "done", "  the procedure still finishes")
+
 fp("steps ls prompts")
 rec = record("prompts")
 WoW.readyCheck = { status = "waiting", left = 20 }
@@ -234,28 +247,58 @@ shoot()
 eq(shots, 1, "invite 3: a screenshot")
 WoW.closeDialog(d3)
 S.Answer(true)
+local hints = logCount("type: /console test_cameraOverShoulder")
 S.Run()
+check(not win:IsShown(), "invite 5: closed")
+S.Poll()
+eq(rec.at, 6, "invite 6: waits while the exit animation runs")
 ticks(0.1, 20)
 WoW.flushTimers()
-check(not win:IsShown(), "invite 5: closed")
+S.Poll()
+check(tostring(rec.results[6].detail):find("the presentation ended", 1, true), "  and saves that it ended")
+eq(logCount("type: /console test_cameraOverShoulder"), hints, "  no /console hint in the middle of the procedure")
 S.Answer(true)
 eq(rec.status, "done", "the invite procedure finishes")
-eq(rec.results[7].check, "PASS", "  no blocked action since it started")
+eq(rec.results[8].check, "PASS", "  no blocked action since it started")
+
+-- #32 changed only the names procedure's functions: its rev went to 2, so a
+-- run started before is stopped at /reload rather than resumed.
+eq((FP.procedures["LibShowcaseProbe/names"].identity:match("^(%d+):")), "2", "the names procedure is rev 2")
 
 WoW.cvars.UnitNameOwn = "1"
+-- A one-off names check left open: the procedure's Hide refuses (a logged
+-- error, the step stays) rather than closing it, and Retry works once closed.
+fp("ls names")
+eq(WoW.cvars.UnitNameOwn, "0", "a one-off names check is open")
+local errorsBefore = #errors
 fp("steps ls names")
 rec = record("names")
 S.Next(); S.Run()
-eq(WoW.cvars.UnitNameOwn, "0", "names 2: hidden")
+eq(rec.at, 2, "names 2: refused while a names check is open")
+eq(rec.results[2].errors, 1, "  as an error on the step")
+eq(#errors, errorsBefore + 1, "  sent to the error handler")
+eq(WoW.cvars.UnitNameOwn, "0", "  the open check is left as it was")
+expectedErrors = 1
+fp("ls names")
+ticks(0.1, 20)
+WoW.advance(1.5)
+eq(WoW.cvars.UnitNameOwn, "1", "closed by hand")
+local hints2 = logCount("type: /console test_cameraOverShoulder")
+S.Run()
+eq(WoW.cvars.UnitNameOwn, "0", "names 2: Retry hides them")
 shoot()
 eq(shots, 2, "  with a screenshot")
 S.Answer(false)
 S.Run()
 S.Poll()
+eq(rec.at, 5, "names 5: waits while the exit animation runs")
 ticks(0.1, 20)
 WoW.flushTimers()
 S.Poll()
+check(tostring(rec.results[5].detail):find("the presentation ended", 1, true), "  and saves that it ended")
 eq(rec.results[6].check, "PASS", "names 6: every value back after the restore")
+eq(logCount("[after (check)]"), 0, "  the check gives the run's verdict, no second read")
+eq(logCount("type: /console test_cameraOverShoulder"), hints2, "  no /console hint in the middle of the procedure")
 eq(rec.at, 7, "names 7: the /reload")
 S.Next()
 eq(rec.results[8].check, "PASS", "names 8: and after it")
@@ -276,8 +319,8 @@ eq(rec.status, "done", "the rereg procedure finishes")
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
-eq(logCount("ERROR"), 0, "no command or step logged an error")
-eq(#errors, 0, "nothing reached the error handler" .. (errors[1] and (": " .. errors[1]) or ""))
+eq(logCount("ERROR"), expectedErrors, "no command or step logged an error but the names refusal")
+eq(#errors, expectedErrors, "nothing else reached the error handler" .. (errors[2] and (": " .. errors[2]) or ""))
 eq(#WoW.chat, 0, "nothing went to chat" .. (WoW.chat[1] and (": " .. WoW.chat[1]) or ""))
 local log = DB.log
 fp("ls clear")
