@@ -642,6 +642,186 @@ fp("steps stop")
 fp("ls tempback")
 rawset(_G, "C_CVar", hadCVar)
 
+-- The release check. The stub's input style (C_InputInterfaceStyle, in the
+-- 70959 dump) is put back for its gamepad part.
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return WoW.inputStyle end })
+WoW.sex = 3
+WoW.cvars.cameraYawMoveSpeed = "180"
+fp("steps ls release")
+rec = record("release")
+local shots0 = shots
+S.Run()
+check(tostring(rec.results[1].detail):find("sex 3, shoulder offset", 1, true), "release 1: presenting, the race and sex logged")
+eq(rec.at, 2, "release 2: waits for the camera to settle (Codex, PR #58)")
+S.Poll()
+eq(rec.at, 2, "  still waiting mid-entry, so no screenshot yet")
+eq(shots, shots0, "  none taken")
+ticks(0.1, 20); S.Poll(); shoot(); S.Poll()
+eq(shots, shots0 + 1, "  one once it settled")
+S.Answer(true)
+S.Run(); untilEnded()
+eq(rec.at, 6, "release 5: ended")
+-- Another speed, read back; abandoned, it is put back (Codex, PR #58).
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "360", "release 6: the turn speed doubled")
+check(SC:IsActive(), "  presenting again")
+fp("steps stop")
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "stopped mid-trial: the turn speed put back")
+ticks(0.1, 20); WoW.flushTimers()
+check(not SC:IsActive(), "  and the presentation closed")
+WoW.cvars.cameraYawMoveSpeed = "300"
+fp("steps ls release")
+rec = record("release")
+S.Run(); ticks(0.1, 20); S.Poll(); shoot(); S.Poll(); S.Answer(true); S.Run(); untilEnded()
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "150", "release 6: a fast setting is halved, so the change is always twice")
+S.Answer(true)
+S.Run(); untilEnded()
+eq(WoW.cvars.cameraYawMoveSpeed, "300", "release 8: the turn speed put back")
+WoW.cvars.cameraYawMoveSpeed = "180"
+-- #21; the handler is disarmed when the wait is left.
+S.Run()
+S.Back()
+eq(rec.at, 10, "release 11: Back from the combat wait")
+local tried = logCount("in a later REGEN_DISABLED handler")
+WoW.enterCombat()
+eq(logCount("in a later REGEN_DISABLED handler"), tried, "  a pull after leaving it: the handler was disarmed")
+WoW.leaveCombat()
+S.Run()
+WoW.enterCombat()
+S.Poll()
+eq(rec.results[11].check, "PASS", "release 11: a later REGEN_DISABLED handler's Enter and HideGameUI refused")
+check(not SC:IsActive() and UIParent:IsShown(), "  nothing presented")
+WoW.leaveCombat()
+S.Answer(true)
+-- #40: a dialog that isn't the countdown doesn't start the clock; Done before
+-- 61 s leaves the hide untried (Codex, PR #58).
+local hides = 0
+S.Run()
+StaticPopup_Show("PARTY_INVITE"); WoW.flushTimers()
+for _, d in ipairs(WoW.dialogs) do WoW.closeDialog(d) end
+S.Poll()
+eq(rec.at, 14, "release 14: a dialog alone doesn't start the countdown clock")
+-- A countdown in the same frame as that dialog's reveal: the reveal is the
+-- dialog's, not the countdown's (Codex, PR #58). Past 61 s it still waits.
+WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 90, 90, true, "Leader")
+check(logHas("it brought the UI back false"), "release 14: a countdown after a same-frame dialog reveal didn't bring the UI back")
+WoW.advance(62)
+S.Poll()
+eq(rec.at, 14, "  so the wait goes on past 61 s")
+S.Next()   -- Done
+check(tostring(rec.results[15].detail):find("not measured", 1, true), "release 15: Done: not measured")
+eq(rec.results[15].check, "FAIL", "  saved as such")
+-- The cut-short trial disarmed the countdown: Back to Open arms a new one.
+-- While that first countdown is still open, Open can't hide the UI, so it
+-- refuses (Codex, PR #58); once it is cancelled, Open hides it.
+S.Back(); S.Back(); S.Back()
+eq(rec.at, 13, "  Back to Open")
+local errs5 = #errors
+S.Run()
+eq(rec.at, 13, "release 13: the UI kept up by the open countdown, Open refuses")
+expectedErrors = expectedErrors + (#errors - errs5)
+WoW.fire("CANCEL_PLAYER_COUNTDOWN", "Player-1-00000001", true)
+S.Run()
+check(SC:IsGameUIHidden() and not UIParent:IsShown(), "release 13: Open hides the UI")
+WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 90, 90, true, "Leader")
+check(logHas("it brought the UI back true"), "  and this countdown brought it back")
+WoW.advance(62)
+S.Poll()
+eq(rec.results[15].check, "PASS", "release 15: HideGameUI 61 s into a 90 s countdown is refused")
+S.Run(); untilEnded()
+WoW.fire("CANCEL_PLAYER_COUNTDOWN", "Player-1-00000001", true)
+-- #54: a centring write during Enter is a FAIL check (Codex, PR #58).
+S.Run()
+check(tostring(rec.results[18].detail):find("centring 1/0", 1, true), "release 18: the centring read on mouse and keyboard")
+WoW.gamepadMode(true)
+local writeOne = true
+win:HookScript("OnShow", function() if writeOne then SetCVar("CameraKeepCharacterCentered", "1") end end)
+S.Run()
+eq(rec.results[19].check, "FAIL", "release 19: a centring write during Enter is a FAIL")
+writeOne = false
+S.Run(); untilEnded()
+S.Back(); S.Back(); S.Back()
+S.Run()
+eq(rec.results[19].check, "PASS", "release 19: no centring write by Enter in gamepad mode")
+S.Run(); untilEnded()
+WoW.gamepadMode(false)
+S.Run()
+eq(rec.status, "done", "the release procedure finishes")
+eq(rec.results[22].check, "PASS", "release 22: the centring CVars as before")
+-- Done pressed mid-entry takes no framing shot (Codex, PR #58).
+WoW.advance(5)
+fp("steps ls release")
+rec = record("release")
+local shots1 = shots
+S.Run(); S.Next(); shoot()
+eq(shots, shots1, "release 2: Done mid-entry takes no screenshot")
+fp("steps stop")
+win:Hide(); ticks(0.1, 20); WoW.flushTimers()
+-- A new run can't pass on the last run's measurements (Codex, PR #58): every
+-- part skipped, its verdicts read "not measured".
+WoW.advance(5)
+fp("steps ls release")
+rec = record("release")
+for _ = 1, 20 do S.Skip() end
+eq(rec.at, 22, "a second release run, every part skipped")
+S.Run()
+eq(rec.results[22].check, "FAIL", "  the gamepad comparison is not measured")
+check(tostring(rec.results[22].checkDetail):find("not measured", 1, true), "  and says so")
+eq(rec.results[15].check, "FAIL", "  nor the countdown")
+check(tostring(rec.results[15].detail):find("not measured", 1, true), "  which says so")
+rawset(_G, "C_InputInterfaceStyle", nil)
+WoW.sex = 2
+
+-- #39's premise: one full turn timed at 90 and at 360.
+WoW.cvars.cameraYawMoveSpeed = "180"
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "90", "orbitspeed 1: the turn speed at 90")
+check(hasCall("MoveViewLeftStart(0.1)"), "  the camera turning at a fixed speed")
+-- Stopped mid-turn: the camera stops and the turn speed goes back.
+WoW.calls = {}
+fp("steps stop")
+check(hasCall("MoveViewLeftStop()"), "stopped mid-turn: the camera stops")
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "  and the turn speed is put back")
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+S.Run()
+WoW.advance(40); S.Run()
+check(tostring(rec.results[2].detail):find("one turn in 40.0 s", 1, true), "orbitspeed 2: the turn timed")
+S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "360", "orbitspeed 3: the turn speed at 360")
+WoW.advance(10); S.Run()
+eq(rec.status, "done", "the orbitspeed procedure finishes")
+check(tostring(rec.results[5].detail):find("ratio 4.00: scales", 1, true), "orbitspeed 5: a ratio of 4 reads as scaling")
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "  the turn speed put back")
+-- Between the turns the player's turn speed is back (Codex, PR #58).
+WoW.advance(5)
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+S.Run(); WoW.advance(40); S.Run()
+eq(WoW.cvars.cameraYawMoveSpeed, "180", "orbitspeed 2: the turn speed back between the turns")
+-- A turn left early is dropped: Back from its Turned, Skip its Start, and
+-- Turned refuses instead of timing the abandoned start (Codex, PR #58).
+S.Run()
+S.Back()
+S.Skip()
+local errs6 = #errors
+WoW.advance(10); S.Run()
+eq(rec.at, 4, "orbitspeed 4: Turned without its own Start refuses")
+check(logHas("this turn was not started"), "  saying so")
+expectedErrors = expectedErrors + (#errors - errs6)
+fp("steps stop")
+-- A new run with its turns skipped doesn't reuse the last run's timings.
+WoW.advance(5)
+fp("steps ls orbitspeed")
+rec = record("orbitspeed")
+for _ = 1, 4 do S.Skip() end
+eq(rec.status, "done", "an orbitspeed run with both turns skipped")
+check(tostring(rec.results[5].detail):find("not measured: both turns must be timed in this run", 1, true),
+      "  is not measured, whatever an earlier run timed")
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
