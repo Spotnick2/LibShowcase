@@ -114,9 +114,10 @@ Plain Lua 5.1, modelled on LibGlass's harness. The test scaffolding is WowTestKi
 hands off to the kit's runner (`luac -p` on the XML's files and the tests, then every
 `tests\test_*.lua`). `tests\kit.lua`, `kit.ps1` and `fetch_kit.sh` are the kit's bootstrap
 copies: never edit them here. A kit need is an issue on the kit, worked around in
-`tests\wow_stubs.lua` with a `-- WowTestKit #N:` comment meanwhile (today #99: `SetParent` moves
-the frame level and fires `OnShow` / `OnHide`). `tests\run.ps1 -KitDev` runs against the `..\WowTestKit` working copy
-instead of the pin. The repo has no CI.
+`tests\wow_stubs.lua` with a `-- WowTestKit #N:` comment meanwhile (none today; the last, #99,
+`SetParent`'s scripts and level, went into the kit, measured, at the pin's `38188ef`).
+`tests\run.ps1 -KitDev` runs against the `..\WowTestKit` working copy instead of the pin. The
+repo has no CI.
 
 - `tests\wow_stubs.lua`: this library's part of the mock, every stubbed global confirmed in the
   API dump: camera, CVars, `SetUIVisibility`, the StaticPopup pool, `WoW.enterCombat` /
