@@ -195,9 +195,9 @@ local M = {
     { "the player's Escape shown again by the library", { { "    if st.uiHidden then I.ShowUI(true) end", "    if st.uiHidden then I.ShowUI() end" } } },
     -- #21: combat has started once the client's combat flag is up
     { "the client's combat flag ignored", {
-        { '    return type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true\n', "    return false\n" } } },
+        { '    return type(affecting) == "function" and affecting("player") == true\n', "    return false\n" } } },
     { "InCombat ignores the lockdown", {
-        { "    if Locked() then return true end\n    return type(UnitAffectingCombat)", "    return type(UnitAffectingCombat)" } } },
+        { "    if Locked() then return true end\n", "" } } },
     { "a drop deferred on the combat flag", {
         { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred", "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred" } } },
     -- #54: gamepad mode's temp CVars
@@ -232,7 +232,7 @@ local M = {
           "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\n    cam.mode, cam.elapsed" } } },
     -- #38: the female column
     { "the female column ignored", { { "local f = (tonumber(sex) == 3 and lib.FEMALE_SHOULDER_FACTORS[id])", "local f = (false and lib.FEMALE_SHOULDER_FACTORS[id])" } } },
-    { "the player's sex not asked", { { '    if type(UnitSex) == "function" then sex = UnitSex("player") end\n', "" } } },
+    { "the player's sex not asked", { { '    if type(unitSex) == "function" then sex = unitSex("player") end\n', "" } } },
     { "the female table replaced on load", { { "lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {", "lib.FEMALE_SHOULDER_FACTORS = fill({}, {" } } },
     { "an unknown race not sent to the default", { { "    if not lib.SHOULDER_FACTORS[id] then id = 0 end\n", "" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
