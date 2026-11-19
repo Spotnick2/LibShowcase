@@ -206,9 +206,15 @@ local M = {
     { "a secret countdown duration read", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", tonumber(timeRemaining), true' } } },
     { "a secret value taken as plain", { { "    if ok and yes then return v end\n", "    do return v end\n" } } },
     -- #39: the orbit follows cameraYawMoveSpeed
-    { "the orbit not scaled", { { "        cam.orbitSpeed = cfg.orbitSpeed * (180 / yawMoveSpeed)\n", "        cam.orbitSpeed = cfg.orbitSpeed\n" } } },
-    { "the scaled orbit speed kept after a restore", { { "    cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil\n    cam.orbitSpeed = nil\n",
-                                                         "    cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil\n" } } },
+    { "the orbit not scaled", { { "    return cfg.orbitSpeed * (180 / I.YawMoveSpeed())\n", "    return cfg.orbitSpeed\n" } } },
+    { "a bad turn speed not sent to 180", { { "    if v <= 0 then v = 180 end\n", "" } } },
+    -- Codex on #48: the setting is read when the orbit starts or resumes
+    { "the settled orbit uses the speed of Enter", {
+        { "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end\nend",
+          "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\nend" } } },
+    { "the resumed orbit uses the speed of Enter", {
+        { "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end\n    cam.mode, cam.elapsed",
+          "    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.yawToSpeed) end\n    cam.mode, cam.elapsed" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
 }
 

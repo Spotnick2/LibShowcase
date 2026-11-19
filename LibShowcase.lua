@@ -1113,17 +1113,14 @@ function I.Enter(inst, anchor)
     end
 
     do
-        local yawMoveSpeed = tonumber(type(GetCVar) == "function" and GetCVar("cameraYawMoveSpeed")) or 180
-        if yawMoveSpeed <= 0 then yawMoveSpeed = 180 end
+        local yawMoveSpeed = I.YawMoveSpeed()
         local dir = cfg.yawOffset < 0 and -1 or 1
         local degrees = math.abs(cfg.yawDegrees)
         local seconds = math.max(0.05, cfg.enterDuration)
         local speed = Clamp((degrees / yawMoveSpeed) / seconds, 0.10, 4.0, 1.0)
-        -- MoveView*Start's speed is a multiple of cameraYawMoveSpeed, so the
-        -- orbit is scaled like the turn: orbitSpeed is the speed at the
-        -- default 180, whatever the player's setting (#39).
-        cam.orbitSpeed = cfg.orbitSpeed * (180 / yawMoveSpeed)
-        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, cam.orbitSpeed
+        -- The entry eases toward the orbit speed of this moment; the orbit
+        -- itself reads the setting again when it starts (I.OrbitSpeed).
+        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, I.OrbitSpeed(cfg)
         I.StopYaw()
         I.ApplyYaw(dir * speed)
         I.Debug(inst, string.format("enter yaw: target=%d speed=%.3f yawMoveSpeed=%.1f",
@@ -1195,7 +1192,6 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
-    cam.orbitSpeed = nil
     -- The lifts stay while the UI is still hidden (a show owed after the
     -- lockdown, #42): PLAYER_REGEN_ENABLED drops them with it.
     if not st.uiHidden then I.DropAll() end
@@ -1221,6 +1217,23 @@ function I.MaybeSalute(cam)
     if type(DoEmote) == "function" then pcall(DoEmote, "SALUTE") end
 end
 
+-- The player's camera turn speed (cameraYawMoveSpeed; 180 when unset or
+-- not a positive number).
+function I.YawMoveSpeed()
+    local v = tonumber(type(GetCVar) == "function" and GetCVar("cameraYawMoveSpeed")) or 180
+    if v <= 0 then v = 180 end
+    return v
+end
+
+-- The orbit's MoveView*Start speed. That speed is a multiple of
+-- cameraYawMoveSpeed, so the orbit is scaled like the turn: orbitSpeed is the
+-- speed at the default 180, whatever the player's setting (#39). Read each
+-- time the orbit starts or resumes, since the player may change the setting
+-- mid-presentation (Codex, #48).
+function I.OrbitSpeed(cfg)
+    return cfg.orbitSpeed * (180 / I.YawMoveSpeed())
+end
+
 -- The settled presentation: a slow orbit, or still. With castAware, the
 -- settled view is saved first so a cast can return to it.
 function I.Settle(cam)
@@ -1228,7 +1241,7 @@ function I.Settle(cam)
     if cam.cfg.castAware and cam.cfg.presentationViewSlot then
         cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false
     end
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * (cam.orbitSpeed or cam.cfg.orbitSpeed)) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
 end
 
 function I.OnUpdate(elapsed)
@@ -1315,7 +1328,7 @@ function I.ResumeOrbitAfterCast()
     end
     if cam.mode ~= "castHold" then return end
     I.StopYaw()
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * (cam.orbitSpeed or cam.cfg.orbitSpeed)) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
     cam.mode, cam.elapsed, cam.castResetDuration, cam.resumeAfterReset = nil, 0, nil, nil
     lib.animFrame:Hide()
 end
