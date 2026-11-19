@@ -419,43 +419,61 @@ local function untilEnded()
 end
 fp("steps ls follow")
 rec = record("follow")
-S.Next(); S.Answer(true)
-check(tostring(rec.results[3].detail):find("cameraView 0, cameraSmoothStyle 4", 1, true), "follow 3: the before snapshot")
+S.Next()
+check(tostring(rec.results[2].detail):find("cameraView 0, cameraSmoothStyle 4", 1, true), "follow 2: the before snapshot")
 eq(DB.follow.before.cameraSmoothStyle, "4", "  kept in the saved variables")
 eq(DB.follow.before.Sound_EnableSFX, nil, "  camera CVars only")
+-- A failed control: no trial can be measured, Open refuses (Codex, PR #52).
+local errs2 = #errors
+S.Answer(false)
 S.Run()
-check(SC:IsActive() and win:IsShown(), "follow 4: presenting")
+eq(rec.at, 4, "follow 4: after a failed control, Open keeps the step")
+check(not SC:IsActive(), "  and nothing presents")
+check(logHas("the camera did not follow before this trial"), "  saying why")
+S.Back(); S.Answer(true)
+S.Run()
+check(SC:IsActive() and win:IsShown(), "follow 4: after a passing control, Open presents")
 S.Run(); untilEnded()
 check(tostring(rec.results[6].detail):find("the presentation ended", 1, true), "follow 6: a normal exit")
-check(tostring(rec.results[7].detail):find("exit: ", 1, true), "follow 7: compared")
+check(tostring(rec.results[7].detail):find("cameraView 0 -> 5", 1, true), "follow 7: the view left on 5 is named")
+eq(DB.follow.exit[1], "cameraView 0 -> 5", "  and saved")
+S.Answer(false)
+-- Reset puts the view back and reads it back; one Open per control.
+S.Run()
+eq(WoW.cvars.cameraView, "0", "follow 9: Reset puts the view back")
+check(tostring(rec.results[9].detail):find("view 0", 1, true), "  and says so")
 S.Answer(true)
 S.Run()
 WoW.playerSetUIVisibility(true)
--- What the lead in #51 suspects: the view left on another index.
-WoW.cvars.cameraView = "5"
 untilEnded()
-eq(rec.at, 12, "follow 10: Escape ends it, then the comparison runs")
-check(tostring(rec.results[11].detail):find("cameraView 0 -> 5", 1, true), "follow 11: a changed CVar is named")
-eq(DB.follow.escape[1], "cameraView 0 -> 5", "  and saved")
-S.Answer(false)
+eq(rec.at, 14, "follow 12: Escape ends it, then the comparison runs")
+check(tostring(rec.results[13].detail):find("escape: ", 1, true), "follow 13: compared")
+S.Answer(true)
+S.Run(); S.Answer(true)
 S.Run()
 WoW.enterCombat(); WoW.leaveCombat()
 untilEnded()
-eq(rec.at, 16, "follow 14: combat ends it")
+eq(rec.at, 20, "follow 18: combat ends it")
 S.Answer(true)
+S.Run(); S.Answer(true)
 S.Run()
-check(SC:IsActive(), "follow 17: presenting before the /reload")
+check(SC:IsActive(), "follow 23: presenting before the /reload")
 S.Next()   -- the /reload
 win:Hide(); untilEnded()
-check(tostring(rec.results[19].detail):find("reload: ", 1, true), "follow 19: compared after the /reload")
-S.Answer(true)
-S.Run()
-eq(WoW.camera.view, 0, "follow 21: Return goes back to the view of before")
-check(tostring(rec.results[21].detail):find("SetView(0) from view 5", 1, true), "  and says so")
+check(tostring(rec.results[25].detail):find("reload: ", 1, true), "follow 25: compared after the /reload")
+-- A restore that doesn't read back keeps its step (Codex, PR #52).
+local realSet = SetCVar
+rawset(_G, "SetCVar", function(name, value) if name ~= "cameraSmoothStyle" then return realSet(name, value) end end)
 WoW.cvars.cameraSmoothStyle = "0"
 S.Answer(true)
-eq(WoW.cvars.cameraSmoothStyle, "4", "follow 23: every camera CVar put back")
+eq(rec.at, 27, "follow 27: a CVar that won't go back keeps the step")
+check(logHas("not put back: cameraSmoothStyle 0 (want 4)"), "  naming it")
+rawset(_G, "SetCVar", realSet)
+S.Run()
+eq(WoW.cvars.cameraSmoothStyle, "4", "follow 27: Retry puts it back")
 eq(rec.status, "done", "the follow procedure finishes")
+expectedErrors = expectedErrors + (#errors - errs2)
+eq(#errors - errs2, 2, "  two refusals, each sent to the error handler")
 rawset(_G, "ConsoleGetAllCommands", nil)
 
 -- #51's follow-up: back to the default view. C_CVar.GetCVarDefault is in the
@@ -493,8 +511,20 @@ rawset(_G, "C_CVar", {
     GetCVarInfo = function(n) return WoW.cvars[n] end,
 })
 WoW.cvars.CameraKeepCharacterCentered, WoW.cvars.CameraReduceUnexpectedMovement = "1", "0"
+-- In gamepad mode the start values would be the temps: refused, Retry once
+-- off it (Codex, PR #52). C_InputInterfaceStyle is in the 70959 dump.
+local style = 1
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return style end })
+local errs3 = #errors
 fp("steps ls tempcvar")
 rec = record("tempcvar")
+eq(rec.at, 1, "tempcvar 1: refused in gamepad mode")
+check(logHas("gamepad mode is on: use the mouse and keyboard"), "  saying why")
+eq(DB.temp and DB.temp.orig, nil, "  nothing saved as the start values")
+style = 0
+S.Run()
+expectedErrors = expectedErrors + (#errors - errs3)
+rawset(_G, "C_InputInterfaceStyle", nil)
 check(tostring(rec.results[1].detail):find("start: CameraKeepCharacterCentered=1 (info 1)", 1, true), "tempcvar 1: read, with GetCVarInfo")
 S.Run(); S.Run(); S.Run()
 eq(#removed, 2, "tempcvar 2-4: the control, Base, Temp and Remove with no write between")

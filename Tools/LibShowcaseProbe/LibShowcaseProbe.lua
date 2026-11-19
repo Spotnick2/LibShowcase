@@ -789,82 +789,102 @@ local function FollowDiff(tag)
     return true, ("%s: %d changed%s"):format(tag, #changed, #changed > 0 and (": " .. table.concat(changed, "; ")) or "")
 end
 
-local function FollowOpen()
+-- Starts the presentation, or throws: the step stays for Retry, so a trial
+-- that never started can't be answered (Codex, PR #52).
+local function OpenOrThrow()
     if window and window:IsShown() then window:Hide() end
     Show()
     if SC:IsActive() and SC:IsOwner() then return true, "presenting" end
-    return false, "the presentation did not start: close any other showcase, then Back and Open again"
+    if window and window:IsShown() then window:Hide() end
+    error("the presentation did not start: close any other showcase, then Retry", 0)
 end
 
--- Back to the view the player had before (the candidate fix), only if the
--- presentation left another one.
-local function FollowReturn()
-    local before = FollowDB().before
-    local view = type(before) == "table" and tonumber(before.cameraView)
-    local now = GetCVar("cameraView")
-    if not view then return false, "no cameraView in the before snapshot" end
-    if tostring(view) == tostring(now) then return true, "already on view " .. tostring(now) .. ": nothing to do" end
-    local ok, err = pcall(SetView, view)
-    local line = ("SetView(%d) from view %s: pcall %s %s, cameraView now %s")
-        :format(view, tostring(now), tostring(ok), tostring(err), tostring(GetCVar("cameraView")))
-    say("  " .. line)
-    return ok, line
+-- Each trial starts from a camera that follows: the control just before it
+-- said yes (Codex, PR #52: run #468's control failed, and every later trial
+-- then started with the symptom already there).
+local followOK = false
+local function FollowControlLeft(outcome) followOK = outcome == "yes" end
+local function FollowOpen()
+    if not followOK then
+        error("the camera did not follow before this trial, so it can't be measured: Back to the control"
+            .. " once it follows, or Stop", 0)
+    end
+    followOK = false   -- one trial per control
+    return OpenOrThrow()
 end
 
--- Every camera CVar back to "before", and the view: the player's camera as it
--- was when the procedure started.
+-- Every camera CVar and the view back to "before", read back: a mismatch
+-- throws (the step stays, Retry) instead of reporting a clean restore.
 local function FollowRestore()
     local before = FollowDB().before
-    if type(before) ~= "table" then return false, "no before snapshot" end
-    local n = 0
+    if type(before) ~= "table" then error("no before snapshot: start the procedure again", 0) end
+    local n, wrong = 0, {}
     for cvar, v in pairs(before) do
         if cvar ~= "cameraView" and GetCVar(cvar) ~= v then
             if cvar:find("^test_") then lib().SuppressExperimentalCVarPopup() end
             pcall(SetCVar, cvar, v)
             n = n + 1
+            if GetCVar(cvar) ~= v then wrong[#wrong + 1] = ("%s %s (want %s)"):format(cvar, tostring(GetCVar(cvar)), v) end
         end
     end
-    local _, view = FollowReturn()
-    say(("  follow: %d camera CVars put back; %s"):format(n, tostring(view)))
-    return true, n .. " CVars put back; " .. tostring(view)
+    local view = tonumber(before.cameraView)
+    if view and tostring(GetCVar("cameraView")) ~= tostring(before.cameraView) then
+        pcall(SetView, view)
+        if tostring(GetCVar("cameraView")) ~= tostring(before.cameraView) then
+            wrong[#wrong + 1] = ("cameraView %s (want %s)"):format(tostring(GetCVar("cameraView")), before.cameraView)
+        end
+    end
+    if #wrong > 0 then
+        local line = "not put back: " .. table.concat(wrong, "; ")
+        say("  follow: " .. line)
+        error(line .. ". Retry", 0)
+    end
+    local line = ("%d camera CVars put back, view %s"):format(n, tostring(GetCVar("cameraView")))
+    say("  follow: " .. line)
+    return true, line
 end
 
 local FOLLOW_ASK = "Walk forward and turn with the keyboard (A/D or Q/E), without the mouse. Does the camera swing back behind the character as it did at the start?"
+local FOLLOW_CONTROL = "The control: " .. FOLLOW_ASK .. " (It should. If not, this trial can't be measured.)"
+local function Close()
+    if window and window:IsShown() then window:Hide() end
+    return "closing"
+end
 
 Probe:Steps("follow", {
     title = "Does the camera still follow after a presentation (#51)",
     { text = "Out of combat, somewhere open. In Options > Camera, set Camera Following Style to Smart or Always and say which in the Note box." },
-    { text = FOLLOW_ASK .. " (The control: it should.)", ask = true },
     { text = "Recording every camera CVar.", auto = true, run = FollowBefore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
     -- 1. A normal exit.
     { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
-    { text = "Close ends it normally.", button = "Close", run = function()
-          if window and window:IsShown() then window:Hide() end
-          return "closing"
-      end },
+    { text = "Close ends it normally.", button = "Close", run = Close },
     { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
     { text = "Comparing the camera CVars with before.", auto = true, run = function() return FollowDiff("exit") end },
     { text = "After a normal exit: " .. FOLLOW_ASK, ask = true },
-    -- 2. Escape.
+    -- 2. Escape, from the camera as it was.
+    { text = "Reset puts every camera CVar and the view back as at the start.", button = "Reset", run = FollowRestore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
     { text = "Open starts it again.", button = "Open", run = FollowOpen },
     { text = "Press Escape once: the UI comes back and the presentation ends.", timeout = 120, wait = PresentationEnded },
     { text = "Comparing.", auto = true, run = function() return FollowDiff("escape") end },
     { text = "After Escape: " .. FOLLOW_ASK, ask = true },
     -- 3. Combat.
-    { text = "Go next to a mob you can fight. Open starts the presentation.", button = "Open", run = FollowOpen },
+    { text = "Reset puts the camera back again.", button = "Reset", run = FollowRestore },
+    { text = "Go next to a mob you can fight. " .. FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
+    { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
     { text = "Pull the mob: combat ends the presentation. Finish the fight.", timeout = 300, wait = PresentationEnded },
     { text = "Out of combat now? Comparing.", auto = true, run = function() return FollowDiff("combat") end },
     { text = "After combat: " .. FOLLOW_ASK, ask = true },
-    -- 4. /reload mid-presentation: the login heal restores the capture.
+    -- 4. A /reload mid-presentation: its PLAYER_LOGOUT restores and clears
+    -- the capture, so this is the logout path, not the login heal.
+    { text = "Reset puts the camera back again.", button = "Reset", run = FollowRestore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
     { text = "Open starts it once more.", button = "Open", run = FollowOpen },
     { text = "While it is presenting, type /reload.", reload = true },
-    { text = "Comparing (after the heal).", auto = true, run = function() return FollowDiff("reload") end },
+    { text = "Comparing (after the /reload's logout restore).", auto = true, run = function() return FollowDiff("reload") end },
     { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
-    -- The candidate fix, then everything back.
-    { text = "Return puts back the view you had before (cameraView), if the presentation left another one.",
-      button = "Return", run = FollowReturn },
-    { text = "Now: " .. FOLLOW_ASK, ask = true },
-    { text = "Putting every camera CVar back as it was at the start.", auto = true, run = FollowRestore },
+    { text = "Putting every camera CVar and the view back as at the start.", auto = true, run = FollowRestore },
 })
 
 -- 13. #51, the follow-up. The follow run (#468) found the camera not
@@ -959,7 +979,21 @@ local function TempRead(tag)
     return line
 end
 
+-- Gamepad mode, as Blizzard's InputUtil.IsGamepadUIEnabled() tells it
+-- (C_InputInterfaceStyle; Gamepad is 1). Its temps would make the start
+-- values unreadable: GetCVar reads the temp, not the stored value.
+local function InGamepadMode()
+    local style = G("C_InputInterfaceStyle")
+    if type(style) ~= "table" or type(style.GetCurrentStyle) ~= "function" then return false end
+    local types = G("Enum") and Enum.InputDeviceInterfaceType
+    local ok, current = pcall(style.GetCurrentStyle)
+    return ok and current == (type(types) == "table" and types.Gamepad or 1)
+end
+
 local function TempStart()
+    -- A temp already on would be taken for the stored value, and the Base
+    -- write would replace the real one unseen (Codex, PR #52).
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local db = TempDB()
     db.orig = {}
     for _, cvar in ipairs(TEMP_CVARS) do db.orig[cvar] = GetCVar(cvar) end
@@ -997,16 +1031,25 @@ local function TempDo(what)
     return TempRead(what)
 end
 
--- Everything back as it was when the procedure started.
+-- Everything back as it was when the procedure started, read back: a
+-- mismatch throws (the step stays, Retry).
 local function TempPutBack()
     local orig = TempDB().orig
-    if type(orig) ~= "table" then return false, "no start values saved" end
+    if type(orig) ~= "table" then error("no start values saved", 0) end
+    local wrong = {}
     for _, cvar in ipairs(TEMP_CVARS) do
         local remove = TempApi("RemoveTempCVar")
         if remove then pcall(remove, cvar) end
-        if orig[cvar] ~= nil then pcall(SetCVar, cvar, orig[cvar]) end
+        if orig[cvar] ~= nil then
+            pcall(SetCVar, cvar, orig[cvar])
+            if GetCVar(cvar) ~= orig[cvar] then
+                wrong[#wrong + 1] = ("%s %s (want %s)"):format(cvar, tostring(GetCVar(cvar)), orig[cvar])
+            end
+        end
     end
-    return true, TempRead("put back")
+    local line = TempRead("put back")
+    if #wrong > 0 then error("not put back: " .. table.concat(wrong, "; ") .. ". Retry", 0) end
+    return true, line
 end
 
 Probe:Steps("tempcvar", {
@@ -1031,7 +1074,7 @@ Probe:Steps("tempcvar", {
     -- The same through the library itself: a real presentation over the temp.
     { text = "Base and Temp again, then Open starts a real presentation over them.", button = "Open", run = function()
           TempDo("base"); TempDo("temp")
-          return FollowOpen()
+          return OpenOrThrow()
       end },
     { text = "Close ends it.", button = "Close", run = function()
           if window and window:IsShown() then window:Hide() end
