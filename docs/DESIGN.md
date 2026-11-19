@@ -136,7 +136,13 @@ owner.
   (`READY_CHECK_FINISHED`, `LFG_PROPOSAL_DONE`/`_FAILED`/`_SUCCEEDED`, `LFG_ROLE_CHECK_HIDE`/
   `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`,
   `CANCEL_PLAYER_COUNTDOWN`, `STOP_TIMER_OF_TYPE` by timer type), its own time limit (the ready
-  check's, the roll's, the countdown's, the timer's), or 60 s (the role poll has no end event). A roll
+  check's, the roll's, the countdown's, the timer's), or 60 s (the role poll has no end event). A
+  prompt's own limit is capped at 60 s, but a countdown or start timer is held for its whole reported
+  time, up to 3600 s (`PartyCountdownConstants.MaxCountdownSeconds`, 70959): a `/countdown 120` keeps
+  the UI up for 120 s. The 70959 dump marks `START_PLAYER_COUNTDOWN` secret in a chat-messaging
+  lockdown; a payload `canaccessvalue` refuses is never converted (that would error in addon
+  code): the UI still comes back, held for the 60 s fallback. Whether the event arrives in that
+  lockdown is not measured. A roll
   the player answers ends no earlier than its time limit, so the UI may stay up a little longer.
   **A StaticPopup already up, or a prompt still open,** when the UI would be hidden keeps it up:
   its Show already happened, so nothing would bring it back (`HideGameUI` returns

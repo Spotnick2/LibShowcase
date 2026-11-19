@@ -390,6 +390,38 @@ do
     check(SC:HideGameUI(), "  and once its 10 s are over, the UI hides again")
     SC:ForceRestore()
 
+    -- A timer longer than the 60 s prompt timeout is held for its whole time
+    -- (Codex, #47): /countdown 120, the hide retried after 61 s.
+    for _, t in ipairs({
+        { "START_PLAYER_COUNTDOWN", { "Player-1-00000001", 120, 120, true, "Leader" }, "a 120 s countdown" },
+        { "START_TIMER", { 1, 120, 120 }, "a 120 s start timer" },
+    }) do
+        SC:Enter(newWindow())
+        WoW.fire(t[1], unpack(t[2]))
+        WoW.advance(61)
+        eq(select(2, SC:HideGameUI()), "dialog", t[3] .. ": still up after 61 s")
+        WoW.advance(60)
+        check(SC:HideGameUI(), "  and once its 120 s are over, the UI hides again")
+        SC:ForceRestore()
+    end
+
+    -- A secret duration (the 70959 dump: START_PLAYER_COUNTDOWN is secret in
+    -- a chat-messaging lockdown) is never converted: the UI still comes back,
+    -- held for the 60 s fallback.
+    local SECRET = 999
+    local asked = 0
+    rawset(_G, "canaccessvalue", function(v) asked = asked + 1; return v ~= SECRET end)
+    SC:Enter(newWindow())
+    local okFire, err = pcall(WoW.fire, "START_PLAYER_COUNTDOWN", "Player-1-00000001", SECRET, SECRET, true, "Leader")
+    check(okFire, "a secret countdown duration does not error: " .. tostring(err))
+    check(UIParent:IsShown() and asked > 0, "  the UI is brought back, the payload asked about first")
+    WoW.advance(59)
+    eq(select(2, SC:HideGameUI()), "dialog", "  held for the fallback")
+    WoW.advance(3)
+    check(SC:HideGameUI(), "  and 60 s later, not the secret's 999 s, the UI hides again")
+    SC:ForceRestore()
+    rawset(_G, "canaccessvalue", nil)
+
     -- Started before Enter: Enter presents with the UI up, until it ends.
     WoW.fire("READY_CHECK", "Leader", 35)
     local win = newWindow()
