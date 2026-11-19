@@ -363,10 +363,72 @@ eq(rec.at, 8, "rereg 8: the /reload (the CVar put back on 7)")
 S.Next()
 eq(rec.status, "done", "the rereg procedure finishes")
 
+-- #41: the target-lost click. UnitExists and IsTargetLoose are in the 70959 dump.
+-- A trial that can't happen (no target, a soft one, the hide refused) keeps
+-- its step for Retry, so no answer is saved for it (Codex, PR #50).
+local hasTarget, loose = false, false
+rawset(_G, "UnitExists", function(unit) return unit == "target" and hasTarget end)
+rawset(_G, "IsTargetLoose", function() return loose end)
+fp("steps ls sound")
+rec = record("sound")
+local errs = #errors
+S.Run()
+eq(rec.at, 1, "sound 1: no target, Ready keeps the step")
+check(logHas("no target: click an NPC or player, then Retry"), "  and says why")
+hasTarget, loose = true, true
+S.Run()
+eq(rec.at, 1, "sound 1: a soft target keeps it too")
+loose = false
+S.Run()
+eq(rec.at, 2, "sound 1: a hard target goes on")
+-- The Alt+Z control is observed (Codex, PR #50): a hide without a hard
+-- target doesn't count, a hide with one then a show does.
+-- A showcase's own hide and show never count (Codex, PR #50).
+local other4 = LibStub("LibShowcase-1.0"):New({ owner = "AnotherAddon" })
+check(other4:Enter(newWindow()) and not UIParent:IsShown(), "another addon's showcase hides the UI")
+other4:ForceRestore(); ticks(0.1, 20); WoW.flushTimers()
+S.Poll()
+eq(rec.at, 2, "sound 2: a showcase's hide and show don't pass the control")
+hasTarget = false
+WoW.playerSetUIVisibility(false); hasTarget = true; WoW.playerSetUIVisibility(true)
+S.Poll()
+eq(rec.at, 2, "sound 2: Alt+Z without a hard target at the hide doesn't count")
+check(logHas("no hard target when the UI hid"), "  and says so")
+WoW.playerSetUIVisibility(false)
+S.Poll()
+eq(rec.at, 2, "sound 2: the hide alone isn't enough")
+WoW.playerSetUIVisibility(true)
+S.Poll()
+eq(rec.at, 3, "sound 2: the hide with a hard target, then the show, completes it")
+S.Answer(false)
+eq(rec.results[3].check, "PASS", "sound 3: the answer is for a control that ran")
+local other2 = LibStub("LibShowcase-1.0"):New({ owner = "AnotherAddon" })
+other2:Enter()
+S.Run()
+eq(rec.at, 4, "sound 4: the hide refused (another showcase) keeps the step")
+check(not win:IsShown(), "  its window closed again")
+other2:ForceRestore(); ticks(0.1, 20); WoW.flushTimers()
+S.Run()
+expectedErrors = expectedErrors + (#errors - errs)
+eq(#errors - errs, 3, "  three refusals, each sent to the error handler")
+check(SC:IsActive() and SC:IsGameUIHidden() and not UIParent:IsShown(), "sound 4: Retry presents, the UI hidden")
+check(tostring(rec.results[4].detail):find("target exists true, IsTargetLoose false, UI shown true", 1, true),
+      "  the target read before the hide")
+S.Answer(true)
+S.Run()
+ticks(0.1, 20)
+WoW.flushTimers()
+S.Poll()
+check(tostring(rec.results[7].detail):find("the presentation ended", 1, true), "sound 7: the presentation ended")
+S.Answer(true)
+eq(rec.status, "done", "the sound procedure finishes")
+check(tostring(rec.results[9].detail):find("target exists true", 1, true), "  reading the target again")
+eq(rec.results[5].status, "yes", "  the answers saved")
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
-eq(logCount("ERROR"), expectedErrors, "no command or step logged an error but the names refusal")
+eq(logCount("ERROR"), expectedErrors, "no command or step logged an error but the refusals on purpose")
 eq(#errors, expectedErrors, "nothing else reached the error handler" .. (errors[2] and (": " .. errors[2]) or ""))
 eq(#WoW.chat, 0, "nothing went to chat" .. (WoW.chat[1] and (": " .. WoW.chat[1]) or ""))
 -- The client reads "|x" as an escape and drops it (GlassChat #55): no line

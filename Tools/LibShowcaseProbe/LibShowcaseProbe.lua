@@ -23,6 +23,9 @@
 --   rereg     the experimental-CVar popup with its handler left unregistered,
 --             re-registered with Blizzard's own function, and with a closure;
 --             the player types the /console line
+--   sound     hiding the UI with a target selected: does the "target lost"
+--             click play (#41)? Alt+Z first (the control), then the library's
+--             own hide
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -655,6 +658,96 @@ Probe:Steps("names", {
       run = function() return NamesRead("reload") end, check = NamesVerdict },
 })
 
+-- 11. #41: does hiding the UI with a target play the "target lost" click?
+-- Forever loads the Mainline TargetFrame, whose OnHide plays
+-- SOUNDKIT.INTERFACE_SOUND_LOST_TARGET_UNIT unless the target is a soft one
+-- (wow-ui-source forever, Blizzard_UnitFrame/Mainline/TargetFrame.lua);
+-- SetUIVisibility(false) hides it with UIParent. Unmeasured.
+local function TargetState()
+    local exists = G("UnitExists") and UnitExists("target")
+    local loose = G("IsTargetLoose") and IsTargetLoose()
+    local line = ("target exists %s, IsTargetLoose %s, UI shown %s"):format(tostring(exists), tostring(loose),
+        tostring(UIParent:IsShown()))
+    say("  " .. line)
+    return line
+end
+
+-- What a trial needs, checked as it starts: a hard target and the UI shown.
+-- A throw keeps the step (Retry), so no answer is saved for a trial that
+-- didn't happen (Codex, PR #50).
+local function NeedHardTarget()
+    if not (G("UnitExists") and UnitExists("target")) then error("no target: click an NPC or player, then Retry", 0) end
+    if G("IsTargetLoose") and IsTargetLoose() then error("a soft target: click it to make it a hard one, then Retry", 0) end
+    if not UIParent:IsShown() then error("the UI is hidden: Alt+Z, then Retry", 0) end
+end
+
+-- The Alt+Z control, observed (Codex, PR #50): a post-hook on SetUIVisibility
+-- (installed at load; the library's own hook sees the player's Alt+Z the
+-- same way) records the hide, with whether a hard target was there at that
+-- moment, then the show. Only a hide with a hard target, then a show, counts.
+local soundCtl = {}
+local function SoundControlHook(shown)
+    if not soundCtl.armed or soundCtl.done then return end
+    -- A change made while a showcase holds the lease is the library's (its
+    -- hide and show), or happens inside a presentation: never the control.
+    -- It also cancels a half-seen one (Codex, PR #50).
+    local state = lib().state
+    if type(state) == "table" and state.owner ~= nil then
+        if soundCtl.hid ~= nil then say("  control: a showcase changed the UI; start the control again") end
+        soundCtl.hid = nil
+        return
+    end
+    if not shown and not UIParent:IsShown() then
+        local hard = G("UnitExists") and UnitExists("target") and not (G("IsTargetLoose") and IsTargetLoose())
+        soundCtl.hid = hard and true or false
+        say("  control: the UI hid, hard target " .. tostring(soundCtl.hid))
+    elseif shown and UIParent:IsShown() and soundCtl.hid ~= nil then
+        if soundCtl.hid then
+            soundCtl.done = true
+            say("  control: the UI came back; the control ran")
+        else
+            soundCtl.hid = nil
+            say("  control: no hard target when the UI hid: target one, then Alt+Z twice again")
+        end
+    end
+end
+local function SoundControlWait()
+    if soundCtl.done then return true, "Alt+Z hid the UI with a hard target, then showed it" end
+    if soundCtl.hid == nil then return false, "waiting for Alt+Z (the hide), with a hard target" end
+    return false, "waiting for Alt+Z again (the show)"
+end
+
+Probe:Steps("sound", {
+    title = "The target-lost click when the UI hides",
+    { text = "Out of combat, with the game sound on. Target a nearby NPC or player (a hard target: click it), then press Ready.",
+      button = "Ready", run = function() NeedHardTarget(); soundCtl = { armed = true }; return TargetState() end },
+    { text = "The control: press Alt+Z (the UI hides), listen, then Alt+Z again. This step completes once both were seen.",
+      timeout = 600, wait = SoundControlWait },
+    -- The answer counts only for a control that ran (a timed-out wait goes on as a FAIL).
+    { text = "Did you hear the target-lost click when Alt+Z hid the UI?", ask = true,
+      check = function() return soundCtl.done == true, "the control ran" end },
+    { text = "Open starts the presentation: the UI hides. Listen.", button = "Open", run = function()
+          if window and window:IsShown() then window:Hide() end
+          NeedHardTarget()
+          local before = TargetState()
+          Show()
+          -- The engine's UI, not only the library's flag (Codex, PR #50).
+          if not (SC:IsActive() and SC:IsOwner() and SC:IsGameUIHidden() and not UIParent:IsShown()) then
+              if window and window:IsShown() then window:Hide() end
+              error("the presentation did not hide the UI (another showcase, or a dialog up): fix it, then Retry", 0)
+          end
+          return true, before
+      end },
+    { text = "Did you hear the target-lost click when the presentation hid the UI?", ask = true },
+    { text = "Close ends the presentation.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return "closing"
+      end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Is your target still selected?", ask = true },
+    { text = "Reading the target again.", auto = true, run = TargetState },
+})
+
 Probe:Steps("rereg", {
     title = "The experimental-CVar popup, re-registered",
     { text = "Out of combat. Unregister leaves the popup's handler unregistered (the control).",
@@ -704,6 +797,8 @@ ev:SetScript("OnEvent", function(_, event, a1)
                 if reason == "ui-shown" and window then window:Hide() end
             end,
         })
+        -- The sound procedure's Alt+Z control; a post-hook leaves the call secure.
+        hooksecurefunc("SetUIVisibility", function(shown) SoundControlHook(shown) end)
         hooksecurefunc("StaticPopup_Show", function(which)
             say("StaticPopup_Show " .. tostring(which))
             C_Timer.After(0, function() DialogTaint(tostring(which)) end)
