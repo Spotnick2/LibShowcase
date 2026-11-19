@@ -203,6 +203,7 @@ local window
 local Show
 local uiShown = {}           -- the onGameUIShown reasons, in order
 local lastShown = {}         -- the last onGameUIShown: { reason, at = GetTime() }
+local otherRevealAt          -- GetTime() of the last StaticPopup or other prompt start
 local forcedSeen = {}        -- reason -> true for each onForcedExit since the last trial's Open
 local namesOpen              -- "show" or "ui" while a names check holds the names hidden
 local function InviteReady()
@@ -1310,11 +1311,14 @@ end
 -- The countdown, tied to its own events (START_PLAYER_COUNTDOWN and
 -- CANCEL_PLAYER_COUNTDOWN, in the 70959 dump): the hide is tried only when
 -- this countdown has run 61 s and is still going. A 90 s one, under the old
--- 60 s cap, would have let it through.
+-- 60 s cap, would have let it through. The other prompt starts the library
+-- reveals for (its PROMPT_START, all in the 70959 dump) are listened to as
+-- well, only to tell their reveal from the countdown's.
+local COUNTDOWN_EVENTS = { "START_PLAYER_COUNTDOWN", "CANCEL_PLAYER_COUNTDOWN", "READY_CHECK", "LFG_PROPOSAL_SHOW",
+    "LFG_ROLE_CHECK_SHOW", "ROLE_POLL_BEGIN", "PVP_ROLE_POPUP_SHOW", "START_LOOT_ROLL", "START_TIMER" }
 local function DisarmCountdown()
     if rel.cdFrame then
-        pcall(rel.cdFrame.UnregisterEvent, rel.cdFrame, "START_PLAYER_COUNTDOWN")
-        pcall(rel.cdFrame.UnregisterEvent, rel.cdFrame, "CANCEL_PLAYER_COUNTDOWN")
+        for _, ev in ipairs(COUNTDOWN_EVENTS) do pcall(rel.cdFrame.UnregisterEvent, rel.cdFrame, ev) end
     end
 end
 -- Open must hide the UI (a dialog already up would keep it shown, and then
@@ -1330,17 +1334,22 @@ local function ReleaseCountdownOpen()
         error("the presentation kept the UI shown (a dialog or prompt is up): close it, then Retry", 0)
     end
     rel.cdFrame = rel.cdFrame or CreateFrame("Frame")
-    pcall(rel.cdFrame.RegisterEvent, rel.cdFrame, "START_PLAYER_COUNTDOWN")
-    pcall(rel.cdFrame.RegisterEvent, rel.cdFrame, "CANCEL_PLAYER_COUNTDOWN")
+    for _, ev in ipairs(COUNTDOWN_EVENTS) do pcall(rel.cdFrame.RegisterEvent, rel.cdFrame, ev) end
     rel.cdFrame:SetScript("OnEvent", function(_, event, _, timeRemaining)
         if event == "START_PLAYER_COUNTDOWN" then
             local ok, total = pcall(tonumber, timeRemaining)   -- may be secret (70959 dump)
             -- This event's own reveal: the library's handler ran just before,
-            -- in the same frame (an earlier dialog's reveal doesn't count).
-            local revealed = lastShown.reason == "dialog" and lastShown.at == GetTime() and UIParent:IsShown()
-            rel.cd = { start = GetTime(), total = ok and total or nil, run = run, revealed = revealed and true or false }
+            -- in the same frame. A StaticPopup or another prompt that started
+            -- earlier in this frame may be what revealed it: then it doesn't
+            -- count (Codex, PR #58).
+            local now = GetTime()
+            local revealed = lastShown.reason == "dialog" and lastShown.at == now and UIParent:IsShown()
+                and otherRevealAt ~= now
+            rel.cd = { start = now, total = ok and total or nil, run = run, revealed = revealed and true or false }
             say(("  release: a countdown started, %s s; it brought the UI back %s"):format(tostring(rel.cd.total),
                 tostring(rel.cd.revealed)))
+        elseif event ~= "CANCEL_PLAYER_COUNTDOWN" then
+            otherRevealAt = GetTime()   -- another prompt started (the library reveals for it too)
         elseif rel.cd.start then
             rel.cd.cancelled = true
             say("  release: the countdown was cancelled")
@@ -1484,14 +1493,21 @@ local function OrbitStart(yaw)
     SetYaw(yaw)
     MoveViewLeftStop()
     MoveViewLeftStart(ORBIT_TEST_SPEED)
-    orbitT[yaw] = { start = GetTime(), run = RunOf("orbitspeed") }
+    orbitT[yaw] = { start = GetTime(), run = RunOf("orbitspeed"), active = true }
     return ("turning at MoveViewLeftStart(%s) with cameraYawMoveSpeed %s"):format(ORBIT_TEST_SPEED, yaw)
 end
 
+-- Turned ends the turn its own Start began, in this run: a turn left early
+-- (Back, Skip, Stop) is dropped, so a later Turned can't time it from an
+-- abandoned start (Codex, PR #58).
 local function OrbitTurned(yaw)
     MoveViewLeftStop()
     local t = orbitT[yaw]
-    if not (t and t.start) then error("not started: Back to Start", 0) end
+    if not (t and t.active and ThisRun(t.run, "orbitspeed")) then
+        RestoreYaw()
+        error("this turn was not started: Back to Start", 0)
+    end
+    t.active = false
     t.seconds = GetTime() - t.start
     -- The player's turn speed back between the turns too (Codex, PR #58).
     RestoreYaw()
@@ -1499,8 +1515,10 @@ local function OrbitTurned(yaw)
     say("  orbitspeed: " .. line)
     return line
 end
-local function LeaveTurn(outcome)
-    if outcome ~= "done" then MoveViewLeftStop(); RestoreYaw() end
+local function LeaveTurn(yaw)
+    return function(outcome)
+        if outcome ~= "done" then MoveViewLeftStop(); RestoreYaw(); orbitT[yaw] = nil end
+    end
 end
 
 local function OrbitVerdict()
@@ -1522,10 +1540,10 @@ Probe:Steps("orbitspeed", {
     { text = "Out of combat, standing still, somewhere with a clear landmark (a tree, a building). Don't touch the mouse or the turn keys until the end. Start sets the turn speed to 90 and turns the camera.",
       button = "Start", run = function() return OrbitStart("90") end },
     { text = "Press Turned the moment the landmark is back where it was (one full turn).", button = "Turned",
-      run = function() return OrbitTurned("90") end, leave = LeaveTurn },
+      run = function() return OrbitTurned("90") end, leave = LeaveTurn("90") },
     { text = "Start again, at turn speed 360.", button = "Start", run = function() return OrbitStart("360") end },
     { text = "Press Turned when the landmark is back where it was.", button = "Turned",
-      run = function() return OrbitTurned("360") end, leave = LeaveTurn },
+      run = function() return OrbitTurned("360") end, leave = LeaveTurn("360") },
     { text = "Comparing the two turns, then putting the turn speed back.", auto = true,
       run = function() local ok, line = OrbitVerdict(); RestoreYaw(); return ok, line end },
 })
@@ -1584,6 +1602,7 @@ ev:SetScript("OnEvent", function(_, event, a1)
         -- The sound procedure's Alt+Z control; a post-hook leaves the call secure.
         hooksecurefunc("SetUIVisibility", function(shown) SoundControlHook(shown) end)
         hooksecurefunc("StaticPopup_Show", function(which)
+            otherRevealAt = GetTime()   -- the release check tells this reveal from a countdown's
             say("StaticPopup_Show " .. tostring(which))
             C_Timer.After(0, function() DialogTaint(tostring(which)) end)
         end)
@@ -1591,6 +1610,7 @@ ev:SetScript("OnEvent", function(_, event, a1)
         -- prompt on Retail): named, only read. The library hooks this too.
         if type(G("StaticPopupSpecial_Show")) == "function" then
             hooksecurefunc("StaticPopupSpecial_Show", function(frame)
+                otherRevealAt = GetTime()
                 local name = type(frame) == "table" and frame.GetName and frame:GetName()
                 say("StaticPopupSpecial_Show " .. tostring(name or frame))
             end)

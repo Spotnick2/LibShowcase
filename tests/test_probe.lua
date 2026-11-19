@@ -702,10 +702,15 @@ StaticPopup_Show("PARTY_INVITE"); WoW.flushTimers()
 for _, d in ipairs(WoW.dialogs) do WoW.closeDialog(d) end
 S.Poll()
 eq(rec.at, 14, "release 14: a dialog alone doesn't start the countdown clock")
+-- A countdown in the same frame as that dialog's reveal: the reveal is the
+-- dialog's, not the countdown's (Codex, PR #58). Past 61 s it still waits.
 WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 90, 90, true, "Leader")
-WoW.advance(30)
-S.Next()   -- Done, 30 s in
-check(tostring(rec.results[15].detail):find("not measured: the wait was cut short", 1, true), "release 15: Done at 30 s: not measured")
+check(logHas("it brought the UI back false"), "release 14: a countdown after a same-frame dialog reveal didn't bring the UI back")
+WoW.advance(62)
+S.Poll()
+eq(rec.at, 14, "  so the wait goes on past 61 s")
+S.Next()   -- Done
+check(tostring(rec.results[15].detail):find("not measured", 1, true), "release 15: Done: not measured")
 eq(rec.results[15].check, "FAIL", "  saved as such")
 -- The cut-short trial disarmed the countdown: Back to Open arms a new one.
 -- While that first countdown is still open, Open can't hide the UI, so it
@@ -797,6 +802,16 @@ fp("steps ls orbitspeed")
 rec = record("orbitspeed")
 S.Run(); WoW.advance(40); S.Run()
 eq(WoW.cvars.cameraYawMoveSpeed, "180", "orbitspeed 2: the turn speed back between the turns")
+-- A turn left early is dropped: Back from its Turned, Skip its Start, and
+-- Turned refuses instead of timing the abandoned start (Codex, PR #58).
+S.Run()
+S.Back()
+S.Skip()
+local errs6 = #errors
+WoW.advance(10); S.Run()
+eq(rec.at, 4, "orbitspeed 4: Turned without its own Start refuses")
+check(logHas("this turn was not started"), "  saying so")
+expectedErrors = expectedErrors + (#errors - errs6)
 fp("steps stop")
 -- A new run with its turns skipped doesn't reuse the last run's timings.
 WoW.advance(5)
