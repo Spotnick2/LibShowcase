@@ -195,7 +195,7 @@ end
 --------------------------------------------------------------------------------
 
 -- Prompt getters: in the dump by NAME only (the _G walk), no signature. The
--- shapes are Retail's, UNMEASURED on Forever (/lsprobe prompts measures them).
+-- shapes are Retail's, UNMEASURED on Forever (/fp steps ls prompts measures them).
 function GetReadyCheckStatus(unit)
     return unit == "player" and WoW.readyCheck and WoW.readyCheck.status or nil
 end
@@ -261,6 +261,7 @@ local allowNil = {
     UnitBuff = true, NUM_CHAT_WINDOWS = true,   -- not in the 70205 dump (AltStable's block reads them)
     AltStable = true, AltStableConfig = true,
     LIBSHOWCASE_MARK = true,              -- the synthetic newer copy's call counters
+    LibShowcaseProbeDB = true,            -- the probe's SavedVariables, before its ADDON_LOADED
 }
 -- AltStable's block reads the chat edit boxes by name, up to NUM_CHAT_WINDOWS
 -- or 10; a test makes the ones it needs.

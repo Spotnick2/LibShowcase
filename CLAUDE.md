@@ -26,8 +26,13 @@ requests here.
 - **`LibShowcase.lua`**: the one runtime file. `MAJOR, MINOR = "LibShowcase-1.0", N`.
 - **`Tools\deploy.ps1`**: copies this checkout into `AddOns\<Addon>\Libs\LibShowcase-1.0`
   (preflight: the XML, every file it loads, LICENSE).
-  **`Tools\LibShowcaseProbe\`**: a dev addon (`/lsprobe`) for the in-game measurements the design
-  still depends on; `Tools\deploy-probe.ps1` installs it. Never shipped.
+  **`Tools\LibShowcaseProbe\`**: the developer probe, a **ForeverProbe module** (`/fp ls`; was
+  `/lsprobe`, #26) for the in-game measurements the design still depends on. Each one the owner
+  does by hand is a procedure (`/fp steps ls pitch|nudge|combat|prompts|invite|names|rereg`).
+  `Tools\deploy-probe.ps1` deploys ForeverProbe (`..\ForeverProbe`), then this checkout into the
+  probe's `Libs\`, then the module. Never shipped. Follow `References\Docs\PROBES.md` and
+  ForeverProbe's `docs\GUIDE.md`; after the owner's `/reload`, read `LibShowcaseProbe.lua` and
+  `ForeverProbe.lua` (`steps.records`) in SavedVariables yourself.
 - **`docs\DESIGN.md`**: the design, the guarantees and the measured facts. **Any behaviour change
   updates it in the same commit.**
 - **`tests\`**: see Testing.
@@ -121,6 +126,10 @@ instead of the pin. The repo has no CI.
 - `tests\harness.lua` loads the library **through the XML's order**; `ticks(dt, n)` runs `n`
   frames. `tests\mutate.lua` is the mutation run, not part of the suite (run `tests\run.ps1`
   once first, so the pinned kit is in the cache).
+- `tests\test_probe.lua` loads ForeverProbe from `..\ForeverProbe` (or `$env:FOREVERPROBE`) and the
+  probe with this checkout, runs every command and walks every procedure. ForeverProbe is
+  private, so it runs locally only: with `FOREVERPROBE_OPTIONAL=1` a missing checkout skips it.
+  Run `tests\run.ps1` before any PR that touches the probe.
 
 - **Behaviour parity:** `tests/test_parity.lua` runs AltStable's original block (frozen as
   `tests/fixtures/altstable_camera.lua`, `SheetUI.lua:196-911` @ AltStable `5297196`) and the
@@ -156,6 +165,7 @@ pwsh tests\run.ps1 -KitDev                                       # against ..\Wo
 
 - **Right-size for a single maintainer.** Simplest thing that works; no speculative config.
 - **Measured beats reasoned.** If a claim about the client can be checked in game, check it
-  (`/lsprobe`), and record it in `docs/DESIGN.md` as MEASURED with the build.
+  (`/fp ls`, a procedure when the owner has to act), and record it in `docs/DESIGN.md` as
+  MEASURED with the build.
 - Keep the `lib._test` seam for test-only internals; don't promote internals to globals.
 - Consumers are separate repos; change them only on their own branches.

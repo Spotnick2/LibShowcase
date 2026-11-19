@@ -1,9 +1,10 @@
 ## Interface: 16001
-## Title: LibShowcase Probe
-## Notes: In-game measurement probe for LibShowcase-1.0 (docs/DESIGN.md, Open measurements). Never shipped: lives under Tools/, which every consumer's .pkgmeta ignores.
+## Title: LibShowcaseProbe
+## Notes: Throwaway probe for LibShowcase-1.0: the in-game measurements docs/DESIGN.md lists as open. A ForeverProbe module: /fp ls. Never shipped: lives under Tools/, which every consumer's .pkgmeta ignores.
 ## Author: Spotnick
 ## Version: dev
+## Dependencies: ForeverProbe
 ## SavedVariables: LibShowcaseProbeDB
 
 Libs\LibShowcase-1.0\LibShowcase-1.0.xml
-Probe.lua
+LibShowcaseProbe.lua

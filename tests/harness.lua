@@ -128,3 +128,45 @@ function hasCall(prefix)
     end
     return false
 end
+
+--------------------------------------------------------------------------------
+-- The probe (Tools/LibShowcaseProbe), a ForeverProbe module
+--------------------------------------------------------------------------------
+
+-- The ForeverProbe checkout ($FOREVERPROBE, else ..\ForeverProbe). It is
+-- private and lives on the owner's disk: with FOREVERPROBE_OPTIONAL=1 (CI) a
+-- missing checkout skips the test file; without it, a missing one is an error.
+function foreverProbeRoot(name)
+    local root = (os.getenv("FOREVERPROBE") or "../ForeverProbe"):gsub("\\", "/"):gsub("/$", "")
+    local toc = io.open(root .. "/ForeverProbe.toc", "rb")
+    if toc then toc:close(); return root end
+    if os.getenv("FOREVERPROBE_OPTIONAL") == "1" then Kit.skip(name, "no ForeverProbe checkout; probe tests run locally") end
+    error("ForeverProbe checkout not found at " .. root .. ": clone it there or set FOREVERPROBE", 0)
+end
+
+-- The host as the client loads it: its TOC's files with ("ForeverProbe", {}),
+-- then its ADDON_LOADED.
+function loadForeverProbe(root)
+    for _, file in ipairs(Kit.tocFiles("ForeverProbe.toc", root .. "/")) do assert(loadfile(file))("ForeverProbe", {}) end
+    WoW.fire("ADDON_LOADED", "ForeverProbe")
+    return ForeverProbe
+end
+
+-- LibShowcaseProbe as the client loads it: its TOC, with the embedded
+-- library's XML expanded to this checkout's files, each called with
+-- (name, ns); then its ADDON_LOADED. Returns the namespace (ns._test).
+function loadProbe()
+    local dir = "Tools/LibShowcaseProbe/"
+    local ns = {}
+    for _, line in ipairs(Kit.tocLines(dir .. "LibShowcaseProbe.toc")) do
+        if line == "Libs\\LibShowcase-1.0\\LibShowcase-1.0.xml" then
+            loadCopy(copyOf(), "LibShowcaseProbe")
+        elseif line:match("%.lua$") then
+            assert(loadfile(dir .. line))("LibShowcaseProbe", ns)
+        else
+            error("loadProbe: an unexpected TOC line: " .. line)
+        end
+    end
+    WoW.fire("ADDON_LOADED", "LibShowcaseProbe")
+    return ns
+end
