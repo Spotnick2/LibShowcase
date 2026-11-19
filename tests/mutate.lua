@@ -205,11 +205,9 @@ local M = {
     { "gamepad mode's enum value wrong", { { "types.Gamepad or 1", "types.Gamepad or 0" } } },
     { "the centring written in gamepad mode", {
         { '        if I.GamepadMode() then\n            I.Debug(inst, "gamepad mode', '        if false then\n            I.Debug(inst, "gamepad mode' } } },
-    { "the capture not marked as stored", { { "            capture.centringStored = true\n", "" } } },
-    { "a marked capture held back in gamepad mode", {
-        { "        if cap.centringStored or not I.GamepadMode() then", "        if not I.GamepadMode() then" } } },
-    { "an older copy's capture written in gamepad mode", {
-        { "        if cap.centringStored or not I.GamepadMode() then", "        if true then" } } },
+    { "the centring restore skipped in gamepad mode", {
+        { "            if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end\n",
+          "            if cap[cvar] ~= nil and not I.GamepadMode() then pcall(SetCVar, cvar, cap[cvar]) end\n" } } },
     -- #40: the pull countdown and the start timers bring the UI back
     { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
     { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },

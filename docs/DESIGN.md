@@ -216,12 +216,12 @@ owner.
   presentation's clear did nothing anyway. Gamepad mode is
   `C_InputInterfaceStyle.GetCurrentStyle() == Enum.InputDeviceInterfaceType.Gamepad`, the test
   Blizzard's `InputUtil.IsGamepadUIEnabled()` makes. There, `Enter` neither captures nor writes
-  them: centring stays on and the shoulder offset shows less.
-  - **On mouse and keyboard**, the capture holds the stored values and says so
-    (`centringStored`). Its restore and its heal write them back even in gamepad mode, since a
-    masked write lands on the stored value, which is the right place.
-  - **A capture from an older copy** (unmarked) may hold the temps. Its centring values are
-    written back only off gamepad mode, where at worst they are the defaults.
+  them: centring stays on and the shoulder offset shows less. A capture of them is written back
+  whatever the input mode at the restore or the heal. In gamepad mode the write lands, unseen, on
+  the stored value, which is where it belongs. Any capture of them, an older copy's too (even one
+  taken under the temps), comes with that copy's `"0"` already written over the stored values, so
+  writing the capture back is never worse than leaving that `"0"` (Codex on PR #55: a live
+  upgrade from MINOR 9 that exits in gamepad mode).
 - **The experimental-CVar popup** is suppressed before each `test_*` write with
   `GameEvent.UnregisterInternalEvent` (MEASURED 70205: callable, no ADDON_ACTION_BLOCKED, no popup)
   and **never given back**: it stays off until the next `/reload`, so a later `test_*` write (the

@@ -1130,13 +1130,12 @@ function I.Enter(inst, anchor)
     I.SetZoom(cam.enterToZoom)
 
     if type(GetCVar) == "function" and type(SetCVar) == "function" then
-        -- Off mouse and keyboard, the reads are the player's stored values:
-        -- centringStored says so, so the restore and the heal write them
-        -- back even if the player has gone to gamepad mode since (#54).
+        -- In gamepad mode the reads would be the temps and the writes would
+        -- land unseen on the player's stored values: nothing is captured or
+        -- written (#54).
         if I.GamepadMode() then
             I.Debug(inst, "gamepad mode: the centring CVars are left alone")
         else
-            capture.centringStored = true
             for _, cvar in ipairs(lib.CENTRING_CVARS) do
                 local prev = GetCVar(cvar)
                 if prev ~= nil then
@@ -1218,13 +1217,14 @@ function I.RestoreCapture(cap)
             I.SuppressExperimentalCVarPopup()
             pcall(SetCVar, "test_cameraOverShoulder", cap.shoulderOffset)
         end
-        -- A capture an older copy took (no centringStored) may have read
-        -- gamepad mode's temp values: written back only off gamepad mode now,
-        -- where at worst it writes the temp's 1/0, the defaults (#54).
-        if cap.centringStored or not I.GamepadMode() then
-            for _, cvar in ipairs(lib.CENTRING_CVARS) do
-                if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end
-            end
+        -- Written back whatever the input mode now: in gamepad mode the write
+        -- lands on the stored value, unseen, which is where it belongs. Any
+        -- capture of them (an older copy's too, even one taken under
+        -- gamepad mode's temps) comes with that copy's "0" already written
+        -- over the stored values, so writing the capture is never worse than
+        -- leaving the "0" (#54; Codex on PR #55).
+        for _, cvar in ipairs(lib.CENTRING_CVARS) do
+            if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end
         end
         if cap.dynamicPitch ~= nil then
             I.SuppressExperimentalCVarPopup()

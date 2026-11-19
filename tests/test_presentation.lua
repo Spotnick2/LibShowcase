@@ -439,7 +439,7 @@ do
     check(SC:Enter(), "gamepad mode: Enter presents")
     check(not hasCall("SetCVar(CameraKeepCharacterCentered") and not hasCall("SetCVar(CameraReduceUnexpectedMovement"),
           "  no centring write")
-    check(db.LibShowcaseCapture.CameraKeepCharacterCentered == nil and not db.LibShowcaseCapture.centringStored,
+    check(db.LibShowcaseCapture.CameraKeepCharacterCentered == nil and db.LibShowcaseCapture.CameraReduceUnexpectedMovement == nil,
           "  nothing captured for them")
     check(tonumber(WoW.cvars.test_cameraOverShoulder) > 0, "  the shoulder offset still written")
     SC:ForceRestore()
@@ -452,31 +452,21 @@ do
     WoW.calls = {}
     check(SC:Enter(), "mouse and keyboard: Enter presents")
     eq(stored(), "00", "  centring cleared")
-    check(db.LibShowcaseCapture.centringStored == true, "  the capture says its values are the stored ones")
     WoW.gamepadMode(true)
     SC:ForceRestore()
     WoW.gamepadMode(false)
     eq(stored(), "01", "  restored to the player's own, though in gamepad mode at the exit")
 
-    -- The heal. A marked capture is written back even in gamepad mode.
-    db.LibShowcaseCapture = { centringStored = true, CameraKeepCharacterCentered = "0", CameraReduceUnexpectedMovement = "1" }
+    -- The heal, in gamepad mode: the capture is written back. The session
+    -- that left it wrote "0" over the stored values (its Enter), so writing
+    -- the capture is never worse than leaving that "0".
+    db.LibShowcaseCapture = { CameraKeepCharacterCentered = "0", CameraReduceUnexpectedMovement = "1" }
     WoW.cvars.CameraKeepCharacterCentered, WoW.cvars.CameraReduceUnexpectedMovement = "0", "0"
     WoW.gamepadMode(true)
     WoW.fire("PLAYER_LOGIN")
     WoW.gamepadMode(false)
-    eq(stored(), "01", "heal: a marked capture is written back in gamepad mode")
-    -- An older copy's capture (no mark) may hold gamepad temps: not in
-    -- gamepad mode...
-    db.LibShowcaseCapture = { CameraKeepCharacterCentered = "1", CameraReduceUnexpectedMovement = "0" }
-    WoW.gamepadMode(true)
-    WoW.fire("PLAYER_LOGIN")
-    WoW.gamepadMode(false)
-    eq(stored(), "01", "heal: an older copy's capture is not written in gamepad mode")
-    eq(db.LibShowcaseCapture, nil, "  and cleared all the same")
-    -- ... but on mouse and keyboard, as before.
-    db.LibShowcaseCapture = { CameraKeepCharacterCentered = "1", CameraReduceUnexpectedMovement = "0" }
-    WoW.fire("PLAYER_LOGIN")
-    eq(stored(), "10", "heal: an older copy's capture is written on mouse and keyboard")
+    eq(stored(), "01", "heal in gamepad mode: the capture lands on the stored values")
+    eq(db.LibShowcaseCapture, nil, "  and is cleared")
 end
 
 done("test_presentation")
