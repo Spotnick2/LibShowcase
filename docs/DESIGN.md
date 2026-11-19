@@ -207,6 +207,22 @@ owner.
 - **A CVar the client lacks is never created**, on the way in or out: the centring CVars,
   `test_cameraOverShoulder` (a cast reset included), `cameraDistanceMaxZoomFactor` and the extras
   are captured only when `GetCVar` returns a value, and only captured ones are written.
+- **Gamepad mode leaves the centring CVars alone** (MINOR 10, #54). In gamepad mode
+  `Blizzard_Gamepad/Core.lua` holds `CameraKeepCharacterCentered` (1) and
+  `CameraReduceUnexpectedMovement` (0) with temp values (`C_CVar.SetTempCVar`). MEASURED 70959
+  (`/fp steps ls tempcvar`, runs #474 to #476): under a temp, `GetCVar` and `C_CVar.GetCVarInfo`
+  read the temp, and a `SetCVar` is invisible but lands on the player's stored value. Once the
+  temp is removed the stored value shows again, unless something wrote it. So capturing and
+  restoring there wrote the temp's 1/0 over the player's own values (until MINOR 9), and the
+  presentation's clear did nothing anyway. Gamepad mode is
+  `C_InputInterfaceStyle.GetCurrentStyle() == Enum.InputDeviceInterfaceType.Gamepad`, the test
+  Blizzard's `InputUtil.IsGamepadUIEnabled()` makes. There, `Enter` neither captures nor writes
+  them: centring stays on and the shoulder offset shows less.
+  - **On mouse and keyboard**, the capture holds the stored values and says so
+    (`centringStored`). Its restore and its heal write them back even in gamepad mode, since a
+    masked write lands on the stored value, which is the right place.
+  - **A capture from an older copy** (unmarked) may hold the temps. Its centring values are
+    written back only off gamepad mode, where at worst they are the defaults.
 - **The experimental-CVar popup** is suppressed before each `test_*` write with
   `GameEvent.UnregisterInternalEvent` (MEASURED 70205: callable, no ADDON_ACTION_BLOCKED, no popup)
   and **never given back**: it stays off until the next `/reload`, so a later `test_*` write (the

@@ -107,7 +107,7 @@ local M = {
           "function I.UnsuppressPopup()\n    pcall(GameEvent.RegisterInternalEvent, POPUP_EVENT, function(...) return GameEvent.HandleExperimentalCVarConfirmationNeeded(...) end)\nend\n" } } },
     -- The camera
     { "the runner hangs from UIParent", { { 'CreateFrame("Frame", nil, WorldFrame)', 'CreateFrame("Frame", nil, UIParent)' } } },
-    { "a missing CVar is created", { { "            if prev ~= nil then\n                capture[cvar] = prev", "            if true then\n                capture[cvar] = prev" } } },
+    { "a missing CVar is created", { { "                if prev ~= nil then\n                    capture[cvar] = prev", "                if true then\n                    capture[cvar] = prev" } } },
     { "centring not restored", { { "            if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end\n", "" } } },
     { "the swing always turns right", { { "        local dir = cfg.yawOffset < 0 and -1 or 1\n", "        local dir = 1\n" } } },
     { "the presentation starts from view 3", { { "    pcall(SetView, 2)\n\n", "    pcall(SetView, 3)\n\n" } } },
@@ -200,6 +200,16 @@ local M = {
         { "    if Locked() then return true end\n    return type(UnitAffectingCombat)", "    return type(UnitAffectingCombat)" } } },
     { "a drop deferred on the combat flag", {
         { "    if Locked() and IsProtectedFrame(frame) then\n        rec.deferred", "    if InCombat() and IsProtectedFrame(frame) then\n        rec.deferred" } } },
+    -- #54: gamepad mode's temp CVars
+    { "gamepad mode never detected", { { "    return ok and current == gamepad\n", "    return false\n" } } },
+    { "gamepad mode's enum value wrong", { { "types.Gamepad or 1", "types.Gamepad or 0" } } },
+    { "the centring written in gamepad mode", {
+        { '        if I.GamepadMode() then\n            I.Debug(inst, "gamepad mode', '        if false then\n            I.Debug(inst, "gamepad mode' } } },
+    { "the capture not marked as stored", { { "            capture.centringStored = true\n", "" } } },
+    { "a marked capture held back in gamepad mode", {
+        { "        if cap.centringStored or not I.GamepadMode() then", "        if not I.GamepadMode() then" } } },
+    { "an older copy's capture written in gamepad mode", {
+        { "        if cap.centringStored or not I.GamepadMode() then", "        if true then" } } },
     -- #40: the pull countdown and the start timers bring the UI back
     { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
     { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
