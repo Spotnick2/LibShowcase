@@ -194,11 +194,17 @@ local M = {
     { "a blocked call read as Escape", { { "    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end\n", "" } } },
     { "the player's Escape shown again by the library", { { "    if st.uiHidden then I.ShowUI(true) end", "    if st.uiHidden then I.ShowUI() end" } } },
     -- #40: the pull countdown and the start timers bring the UI back
-    { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining) return "countdown", tonumber(timeRemaining) end,\n', "" } } },
-    { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(timerType), tonumber(timeRemaining)\n    end,\n', "" } } },
+    { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
+    { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
     { "a cancelled countdown stays open", { { '    CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,\n', "" } } },
-    { "a stopped timer stays open", { { '    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(timerType) end,\n', "" } } },
-    { "a countdown's own time ignored", { { 'return "countdown", tonumber(timeRemaining) end', 'return "countdown" end' } } },
+    { "a stopped timer stays open", { { '    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(Plain(timerType)) end,\n', "" } } },
+    { "a countdown's own time ignored", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", nil, true' } } },
+    -- Codex on #47: timers keep their whole time; a secret payload is never read
+    { "a timer capped at the prompt timeout", { { "    local limit = timer and TIMER_LIMIT or PROMPT_TIMEOUT\n", "    local limit = PROMPT_TIMEOUT\n" } } },
+    { "a countdown capped at the prompt timeout", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", tonumber(Plain(timeRemaining))' } } },
+    { "a start timer capped at the prompt timeout", { { "tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true", "tostring(Plain(timerType)), tonumber(Plain(timeRemaining))" } } },
+    { "a secret countdown duration read", { { 'return "countdown", tonumber(Plain(timeRemaining)), true', 'return "countdown", tonumber(timeRemaining), true' } } },
+    { "a secret value taken as plain", { { "    if ok and yes then return v end\n", "    do return v end\n" } } },
     -- #39: the orbit follows cameraYawMoveSpeed
     { "the orbit not scaled", { { "        cam.orbitSpeed = cfg.orbitSpeed * (180 / yawMoveSpeed)\n", "        cam.orbitSpeed = cfg.orbitSpeed\n" } } },
     { "the scaled orbit speed kept after a restore", { { "    cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil\n    cam.orbitSpeed = nil\n",

@@ -704,9 +704,27 @@ end
 -- touches nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
 -- until its end event, or its own time limit, or PROMPT_TIMEOUT: while one is
 -- open the UI is not hidden (HideUI), as for a StaticPopup already up. The
--- role poll has no end event; its timeout ends it.
+-- role poll has no end event; its timeout ends it. A timer (the third
+-- return: true) is held for its whole reported time, up to TIMER_LIMIT, the
+-- client's longest countdown (PartyCountdownConstants.MaxCountdownSeconds,
+-- 70959): a 120 s countdown must not be hidden after 60 s.
 local PROMPT_TIMEOUT = 60
-local PROMPT_START = {   -- event -> function(...) returning key, seconds?
+local TIMER_LIMIT = 3600
+
+-- A payload value addon code may read, or nil. The 70959 dump marks
+-- START_PLAYER_COUNTDOWN secret in a chat-messaging lockdown, and converting
+-- or comparing a secret value errors in addon code; canaccessvalue is in the
+-- 70959 dump (FrameScript). A client without it has no secret values.
+-- Whether the event even arrives in that lockdown is not measured.
+local function Plain(v)
+    local can = rawget(_G, "canaccessvalue")
+    if type(can) ~= "function" then return v end
+    local ok, yes = pcall(can, v)
+    if ok and yes then return v end
+    return nil   -- one value, not none: tonumber() and tostring() need an argument
+end
+
+local PROMPT_START = {   -- event -> function(...) returning key, seconds?, timer?
     READY_CHECK         = function(_, timeLeft) return "ready", tonumber(timeLeft) end,
     LFG_PROPOSAL_SHOW   = function() return "lfg" end,
     LFG_ROLE_CHECK_SHOW = function() return "rolecheck" end,
@@ -715,9 +733,11 @@ local PROMPT_START = {   -- event -> function(...) returning key, seconds?
     START_LOOT_ROLL     = function(rollID, rollTime)
         return "roll:" .. tostring(rollID), (tonumber(rollTime) or 0) / 1000   -- milliseconds
     end,
-    START_PLAYER_COUNTDOWN = function(_, timeRemaining) return "countdown", tonumber(timeRemaining) end,
+    START_PLAYER_COUNTDOWN = function(_, timeRemaining)
+        return "countdown", tonumber(Plain(timeRemaining)), true
+    end,
     START_TIMER         = function(timerType, timeRemaining)
-        return "timer:" .. tostring(timerType), tonumber(timeRemaining)
+        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true
     end,
 }
 local PROMPT_END = {     -- event -> function(...) returning the key, or a key prefix ending in "*"
@@ -731,7 +751,7 @@ local PROMPT_END = {     -- event -> function(...) returning the key, or a key p
     CANCEL_LOOT_ROLL       = function(rollID) return "roll:" .. tostring(rollID) end,
     CANCEL_ALL_LOOT_ROLLS  = function() return "roll:*" end,
     CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,
-    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(timerType) end,
+    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(Plain(timerType)) end,
 }
 local PROMPT_EVENTS = {}
 for ev in pairs(PROMPT_START) do PROMPT_EVENTS[#PROMPT_EVENTS + 1] = ev end
@@ -748,9 +768,10 @@ end
 function I.OnPromptEvent(event, ...)
     local start, stop = PROMPT_START[event], PROMPT_END[event]
     if start then
-        local key, seconds = start(...)
+        local key, seconds, timer = start(...)
+        local limit = timer and TIMER_LIMIT or PROMPT_TIMEOUT
         if not seconds or seconds <= 0 then seconds = PROMPT_TIMEOUT end
-        st.prompts[key] = Now() + math.min(seconds, PROMPT_TIMEOUT) + 1
+        st.prompts[key] = Now() + math.min(seconds, limit) + 1
         I.RevealForDialog("dialog")
         return true
     elseif stop then
