@@ -88,7 +88,7 @@ do
     f1:SetScript("OnHide", function(self) hides = hides + 1; SC:Drop(self) end)
     SC:Lift(f1); SC:Lift(f2)
     SC:Drop(f1)
-    eq(hides, 1, "the drop fired the frame's OnHide (the stub's SetParent: WowTestKit #99)")
+    eq(hides, 1, "the drop fired the frame's OnHide (SetParent, measured 70959: WowTestKit #99)")
     eq(f1:GetParent(), UIParent, "a drop re-entered from its own OnHide puts the frame back")
     check(SC:IsLifted(f2) and f2:GetParent() == nil, "  and leaves the other lift's record alone")
     SC:Drop(f2)
