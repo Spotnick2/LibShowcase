@@ -421,4 +421,26 @@ end
 local src = readFile("LibShowcase.lua")
 check(src:gsub("\r\n", "\n"):match("\nlib%.ready = MINOR%s*$"), "lib.ready = MINOR is the last line of LibShowcase.lua")
 
+-- #54, a live upgrade (Codex on PR #55): r4 presents on mouse and keyboard
+-- (it captures the player's centring values and writes "0" over them), the
+-- current copy loads, the player switches to gamepad mode, and the exit runs
+-- through the current copy. The capture is written back: it lands, unseen,
+-- on the stored values, and they show once gamepad mode ends.
+do
+    WoW.reset()
+    WoW.resetLibStub()
+    local lib = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r4"), "PortalRoulette")
+    local A = lib:New({ owner = "PortalRoulette", db = {} })
+    WoW.cvars.CameraKeepCharacterCentered, WoW.cvars.CameraReduceUnexpectedMovement = "0", "1"   -- the player's own
+    check(A:Enter(newWindow()), "r4 presents on mouse and keyboard")
+    eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "00", "  centring cleared")
+    loadCopy(copyOf(), "AltStable")
+    eq(activeMinor(), currentMinor(), "the current copy takes over")
+    WoW.gamepadMode(true)
+    A:ForceRestore()
+    WoW.gamepadMode(false)
+    eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "01",
+       "r4's capture restored in gamepad mode: the player's own values once it ends")
+end
+
 done("test_upgrade")
