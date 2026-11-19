@@ -252,9 +252,20 @@ WoW.readyCheck = nil
 S.Next()
 eq(rec.status, "done", "the prompts procedure finishes (the last read on arrival)")
 
+-- Another addon's showcase holds the lease: Open must say the presentation
+-- did not start, as a FAIL (run #419), not "true".
+local other = LibStub("LibShowcase-1.0"):New({ owner = "AnotherAddon" })
+check(other:Enter(), "another addon presents")
 fp("steps ls invite")
 rec = record("invite")
 S.Run()
+eq(rec.results[1].check, "FAIL", "invite 1: a refused Enter is a FAIL")
+check(logHas("the presentation did NOT start"), "  and says so")
+other:ForceRestore()
+ticks(0.1, 20)
+WoW.flushTimers()
+S.Back(); S.Run()
+eq(rec.results[1].check, "PASS", "invite 1: Retry with the lease free starts it")
 check(win:IsShown() and not UIParent:IsShown(), "invite 1: presenting")
 S.Poll()
 eq(rec.at, 2, "invite 2: waits for the dialog")

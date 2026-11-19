@@ -191,10 +191,18 @@ local namesOpen              -- "show" or "ui" while a names check holds the nam
 local function Invite()
     say("== invite: the presentation opens with the UI hidden")
     if not (window and window:IsShown()) then Show() end
-    say("  ask a friend for a party or guild invite. Expect 'onGameUIShown dialog', the UI back,")
+    -- The window shown is not the presentation running: another addon's
+    -- showcase holding the lease (Enter -> busy), or the UI already hidden
+    -- (the window shown under it, so its OnShow and Enter wait), leaves none.
+    local running = SC:IsActive() and SC:IsOwner()
+    if not running then
+        say("  the presentation did NOT start (owner " .. tostring(SC:IsOwner()) .. "): close any other showcase, then Retry")
+        return false
+    end
+    say("  ask a friend for a party, guild or dungeon invite. Expect 'onGameUIShown dialog', the UI back,")
     say("  the camera still orbiting; accept it (no FORBIDDEN line), then /fp ls show to close.")
     say("  Then open the game menu and Quit/Logout: it must work (cancel the countdown).")
-    return window:IsShown()
+    return true
 end
 
 -- 5. The whole presentation. `hint`: once it closes, log the /console line
@@ -587,7 +595,10 @@ Probe:Steps("invite", {
           uiShown = {}
           if window and window:IsShown() then window:Hide() end
           return Invite()
-      end },
+      end,
+      -- A refused Enter is a FAIL here, not a step that reads "true" (run #419:
+      -- another addon's showcase held the lease).
+      check = function() return SC:IsActive() and SC:IsOwner(), "presentation running" end },
     { text = "Ask the friend for a party, guild or dungeon invite (say which in the Note box). This step completes when the invite brings the UI back.",
       timeout = 600, wait = function()
           for _, r in ipairs(uiShown) do if r == "dialog" then return true, "onGameUIShown dialog" end end
