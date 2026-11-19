@@ -586,6 +586,9 @@ Probe:Steps("invite", {
 })
 
 Probe:Steps("names", {
+    -- rev 2 (#32): Hide, the wait and the reads changed functions only, so a
+    -- run started before them is stopped at /reload instead of resumed.
+    rev = 2,
     title = "hideWorldNames in a crowd",
     { text = "Go somewhere crowded (a capital, near other players and their pets), out of combat, then press Next." },
     { text = "Hide lists the name CVars, then opens the presentation with world names hidden.",

@@ -261,6 +261,10 @@ S.Answer(true)
 eq(rec.status, "done", "the invite procedure finishes")
 eq(rec.results[8].check, "PASS", "  no blocked action since it started")
 
+-- #32 changed only the names procedure's functions: its rev went to 2, so a
+-- run started before is stopped at /reload rather than resumed.
+eq((FP.procedures["LibShowcaseProbe/names"].identity:match("^(%d+):")), "2", "the names procedure is rev 2")
+
 WoW.cvars.UnitNameOwn = "1"
 -- A one-off names check left open: the procedure's Hide refuses (a logged
 -- error, the step stays) rather than closing it, and Retry works once closed.
