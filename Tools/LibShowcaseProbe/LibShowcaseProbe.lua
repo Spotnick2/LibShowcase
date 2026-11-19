@@ -1094,6 +1094,10 @@ end
 -- library's presentation write ("0"), "restore" the library's restore of what
 -- it captured under the temp, "remove" the temp removed.
 local function TempDo(what)
+    -- Every write or removal checks the input mode first: switched to
+    -- gamepad mid-run, a Remove would take Blizzard's own temps away. The
+    -- step stays for Retry on mouse and keyboard (Codex, PR #52).
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     for _, cvar in ipairs(TEMP_CVARS) do
         if what == "base" then
             pcall(SetCVar, cvar, TEMP_BASE[cvar])

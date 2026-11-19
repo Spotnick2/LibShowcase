@@ -566,10 +566,18 @@ check(logHas("gamepad mode is on: use the mouse and keyboard"), "  saying why")
 eq(DB.temp and DB.temp.pending, nil, "  nothing saved as the start values")
 style = 0
 S.Run()
+check(tostring(rec.results[1].detail):find("start: CameraKeepCharacterCentered=1 (info 1)", 1, true), "tempcvar 1: read, with GetCVarInfo")
+S.Run(); S.Run()
+-- Switched to gamepad mid-run: Remove refuses before touching the temps,
+-- which would be Blizzard's now (Codex, PR #52).
+style = 1
+S.Run()
+eq(rec.at, 4, "tempcvar 4: Remove refused in gamepad mode, the step stays")
+eq(#removed, 0, "  nothing removed")
+style = 0
+S.Run()
 expectedErrors = expectedErrors + (#errors - errs3)
 rawset(_G, "C_InputInterfaceStyle", nil)
-check(tostring(rec.results[1].detail):find("start: CameraKeepCharacterCentered=1 (info 1)", 1, true), "tempcvar 1: read, with GetCVarInfo")
-S.Run(); S.Run(); S.Run()
 eq(#removed, 2, "tempcvar 2-4: the control, Base, Temp and Remove with no write between")
 check(tostring(rec.results[4].detail):find("remove: ", 1, true), "  read after the removal")
 S.Run()
