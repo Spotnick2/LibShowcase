@@ -254,7 +254,13 @@ function GetCameraZoom() return WoW.camera.zoom end
 function CameraZoomIn(d) log("CameraZoomIn", d); WoW.camera.zoom = math.max(0, WoW.camera.zoom - (d or 1)) end
 function CameraZoomOut(d) log("CameraZoomOut", d); WoW.camera.zoom = WoW.camera.zoom + (d or 1) end
 function SaveView(slot) log("SaveView", slot); WoW.camera.savedViews[slot] = WoW.camera.zoom end
-function SetView(slot) log("SetView", slot); WoW.camera.view = slot end
+-- SetView moves cameraView too (MEASURED 70959, follow run #468: 5 -> 2
+-- while presenting).
+function SetView(slot)
+    log("SetView", slot)
+    WoW.camera.view = slot
+    if WoW.cvars.cameraView ~= nil then WoW.cvars.cameraView = tostring(slot) end
+end
 function MoveViewRightStart(s) log("MoveViewRightStart", s); WoW.camera.yaw = s end
 function MoveViewLeftStart(s) log("MoveViewLeftStart", s); WoW.camera.yaw = -s end
 function MoveViewRightStop() log("MoveViewRightStop"); WoW.camera.yaw = nil end

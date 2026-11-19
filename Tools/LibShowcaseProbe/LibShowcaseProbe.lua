@@ -26,11 +26,18 @@
 --   sound     hiding the UI with a target selected: does the "target lost"
 --             click play (#41)? Alt+Z first (the control), then the library's
 --             own hide
+--   follow    every camera CVar before a presentation, then after a normal
+--             exit, Escape, combat and a /reload mid-presentation: does the
+--             camera still follow the character (#51)?
+--   view      back to the client's default cameraView: does the camera follow
+--             again, and after a /reload (#51)?
+--   tempcvar  the library's SetCVar over the gamepad's temp values on the
+--             centring CVars: what does each layer read, and what is left (#51)?
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
 --   names [ui|list] | testcvar | rereg closure|direct|none | dialogs | focus |
---   next | restore | clear
+--   next | restore | clear | tempback (after a stopped tempcvar run)
 -- Always on: every StaticPopup_Show logs, a frame later, whether each shown
 -- dialog's `which` was written securely (issecurevariable) or TAINTED, and by
 -- which addon. The host's baseline logs every ADDON_ACTION_BLOCKED /
@@ -190,6 +197,7 @@ end
 local window
 local Show
 local uiShown = {}           -- the onGameUIShown reasons, in order
+local forcedSeen = {}        -- reason -> true for each onForcedExit since the last trial's Open
 local namesOpen              -- "show" or "ui" while a names check holds the names hidden
 local function InviteReady()
     if not (SC:IsActive() and SC:IsOwner()) then
@@ -748,6 +756,432 @@ Probe:Steps("sound", {
     { text = "Reading the target again.", auto = true, run = TargetState },
 })
 
+-- 12. #51: after a presentation, does the camera still follow the character?
+-- A player reported it didn't. Unmeasured lead: Enter saves the player's view
+-- into savedViewSlot (5) and switches to view 2; every exit ends on
+-- SetView(5), and cameraView is never captured. The snapshot is every camera
+-- CVar the client lists (ConsoleGetAllCommands, in the 70959 dump; a fixed
+-- list without it), kept in the saved variables so the /reload step compares
+-- with the same "before".
+local FOLLOW_CVARS = { "cameraView", "cameraSmoothStyle", "cameraSmoothTrackingStyle",
+    "CameraKeepCharacterCentered", "CameraReduceUnexpectedMovement", "test_cameraOverShoulder",
+    "test_cameraDynamicPitch", "cameraDistanceMaxZoomFactor", "cameraViewBlendStyle", "cameraYawMoveSpeed" }
+
+local function CameraCVars()
+    local names, seen = {}, {}
+    local function add(n)
+        if type(n) == "string" and not seen[n] then seen[n] = true; names[#names + 1] = n end
+    end
+    for _, n in ipairs(FOLLOW_CVARS) do add(n) end
+    local all = G("ConsoleGetAllCommands")
+    if type(all) == "function" then
+        local ok, list = pcall(all)
+        if ok and type(list) == "table" then
+            for _, c in ipairs(list) do
+                if type(c) == "table" and (c.commandType == nil or c.commandType == 0)
+                    and type(c.command) == "string" and c.command:lower():find("camera") then
+                    add(c.command)
+                end
+            end
+        end
+    end
+    local t = {}
+    for _, n in ipairs(names) do
+        local ok, v = pcall(GetCVar, n)
+        if ok and v ~= nil then t[n] = tostring(v) end
+    end
+    return t
+end
+
+local function FollowDB()
+    LibShowcaseProbeDB.follow = type(LibShowcaseProbeDB.follow) == "table" and LibShowcaseProbeDB.follow or {}
+    return LibShowcaseProbeDB.follow
+end
+
+local function FollowBefore()
+    local snap, n = CameraCVars(), 0
+    for _ in pairs(snap) do n = n + 1 end
+    FollowDB().before, FollowDB().trial = snap, nil
+    local line = ("before: %d camera CVars; cameraView %s, cameraSmoothStyle %s, KeepCentered %s, ReduceUnexpected %s")
+        :format(n, tostring(snap.cameraView), tostring(snap.cameraSmoothStyle),
+            tostring(snap.CameraKeepCharacterCentered), tostring(snap.CameraReduceUnexpectedMovement))
+    say("== follow " .. line)
+    return line
+end
+
+-- Every camera CVar that differs from the trial's snapshot (taken when its
+-- control passed; the start's "before" if none), logged one by one; the
+-- step's detail lists them.
+local function FollowDiff(tag)
+    local db = FollowDB()
+    local before = type(db.trial) == "table" and db.trial or db.before
+    if type(before) ~= "table" then return false, "no before snapshot: start the procedure again" end
+    local now, changed = CameraCVars(), {}
+    local names = {}
+    for n in pairs(before) do names[#names + 1] = n end
+    for n in pairs(now) do if before[n] == nil then names[#names + 1] = n end end
+    table.sort(names)
+    for _, n in ipairs(names) do
+        if before[n] ~= now[n] then
+            changed[#changed + 1] = ("%s %s -> %s"):format(n, tostring(before[n]), tostring(now[n]))
+        end
+    end
+    FollowDB()[tag] = changed
+    say(("== follow %s: %d changed"):format(tag, #changed))
+    for _, c in ipairs(changed) do say("  " .. c) end
+    return true, ("%s: %d changed%s"):format(tag, #changed, #changed > 0 and (": " .. table.concat(changed, "; ")) or "")
+end
+
+-- Starts the presentation, or throws: the step stays for Retry, so a trial
+-- that never started can't be answered (Codex, PR #52).
+local function OpenOrThrow()
+    if window and window:IsShown() then window:Hide() end
+    Show()
+    if SC:IsActive() and SC:IsOwner() then return true, "presenting" end
+    if window and window:IsShown() then window:Hide() end
+    error("the presentation did not start: close any other showcase, then Retry", 0)
+end
+
+-- Each trial starts from a camera that follows: the control just before it
+-- said yes (Codex, PR #52: run #468's control failed, and every later trial
+-- then started with the symptom already there).
+-- A passing control also snapshots the camera as it is then: the trial is
+-- compared with the camera that followed, not with the start's, which may be
+-- the one the tester had to fix (Codex, PR #52). The start's "before" stays
+-- for the final cleanup.
+local followOK = false
+local function FollowControlLeft(outcome)
+    followOK = outcome == "yes"
+    FollowDB().trial = followOK and CameraCVars() or nil
+end
+
+-- The trial's Open: the presentation must start with the UI hidden (a dialog
+-- or prompt up would keep it shown, and Escape could not end it). The passing
+-- control is used up only once that worked, so a refused Open can be retried.
+local function FollowOpen()
+    if not followOK then
+        error("the camera did not follow before this trial, so it can't be measured: Back to the control"
+            .. " once it follows, or Stop", 0)
+    end
+    OpenOrThrow()
+    if not SC:IsGameUIHidden() then
+        if window and window:IsShown() then window:Hide() end
+        error("the presentation kept the UI shown (a dialog or prompt is up): close it, then Retry", 0)
+    end
+    forcedSeen = {}
+    followOK = false   -- one trial per control
+    return true, "presenting, the UI hidden"
+end
+
+-- The trial ended the way it was meant to (onForcedExit's reason), or its
+-- comparison is refused: the step stays, Back to try the trial again.
+local function FollowEndedBy(reason, tag)
+    if not forcedSeen[reason] then
+        error(("the presentation did not end by %s: Back to the control and try the trial again"):format(tag), 0)
+    end
+end
+
+-- Every camera CVar and the view back to "before", read back: a mismatch
+-- throws (the step stays, Retry) instead of reporting a clean restore.
+local function FollowRestore()
+    local before = FollowDB().before
+    if type(before) ~= "table" then error("no before snapshot: start the procedure again", 0) end
+    local n, wrong = 0, {}
+    for cvar, v in pairs(before) do
+        if cvar ~= "cameraView" and GetCVar(cvar) ~= v then
+            if cvar:find("^test_") then lib().SuppressExperimentalCVarPopup() end
+            pcall(SetCVar, cvar, v)
+            n = n + 1
+            if GetCVar(cvar) ~= v then wrong[#wrong + 1] = ("%s %s (want %s)"):format(cvar, tostring(GetCVar(cvar)), v) end
+        end
+    end
+    local view = tonumber(before.cameraView)
+    if view and tostring(GetCVar("cameraView")) ~= tostring(before.cameraView) then
+        pcall(SetView, view)
+        if tostring(GetCVar("cameraView")) ~= tostring(before.cameraView) then
+            wrong[#wrong + 1] = ("cameraView %s (want %s)"):format(tostring(GetCVar("cameraView")), before.cameraView)
+        end
+    end
+    if #wrong > 0 then
+        local line = "not put back: " .. table.concat(wrong, "; ")
+        say("  follow: " .. line)
+        error(line .. ". Retry", 0)
+    end
+    local line = ("%d camera CVars put back, view %s"):format(n, tostring(GetCVar("cameraView")))
+    say("  follow: " .. line)
+    return true, line
+end
+
+local FOLLOW_ASK = "Walk forward and turn with the keyboard (A/D or Q/E), without the mouse. Does the camera swing back behind the character as it did at the start?"
+local FOLLOW_CONTROL = "The control: " .. FOLLOW_ASK .. " (It should. If not, this trial can't be measured.)"
+local function Close()
+    if window and window:IsShown() then window:Hide() end
+    return "closing"
+end
+
+Probe:Steps("follow", {
+    title = "Does the camera still follow after a presentation (#51)",
+    { text = "Out of combat, somewhere open. In Options > Camera, set Camera Following Style to Smart or Always and say which in the Note box." },
+    { text = "Recording every camera CVar.", auto = true, run = FollowBefore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
+    -- 1. A normal exit.
+    { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
+    { text = "Close ends it normally.", button = "Close", run = Close },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Comparing the camera CVars with the trial's start.", auto = true, run = function() return FollowDiff("exit") end },
+    { text = "After a normal exit: " .. FOLLOW_ASK, ask = true },
+    -- 2. Escape, from the camera as it was.
+    { text = "Reset puts every camera CVar and the view back as at the start.", button = "Reset", run = FollowRestore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
+    { text = "Open starts it again.", button = "Open", run = FollowOpen },
+    { text = "Press Escape once: the UI comes back and the presentation ends.", timeout = 120, wait = PresentationEnded },
+    { text = "Comparing.", auto = true, run = function() FollowEndedBy("ui-shown", "Escape"); return FollowDiff("escape") end },
+    { text = "After Escape: " .. FOLLOW_ASK, ask = true },
+    -- 3. Combat.
+    { text = "Reset puts the camera back again.", button = "Reset", run = FollowRestore },
+    { text = "Go next to a mob you can fight. " .. FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
+    { text = "Open starts the presentation.", button = "Open", run = FollowOpen },
+    { text = "Pull the mob: combat ends the presentation. Finish the fight.", timeout = 300, wait = PresentationEnded },
+    { text = "Out of combat now? Comparing.", auto = true, run = function() FollowEndedBy("combat", "combat"); return FollowDiff("combat") end },
+    { text = "After combat: " .. FOLLOW_ASK, ask = true },
+    -- 4. A /reload mid-presentation: its PLAYER_LOGOUT restores and clears
+    -- the capture, so this is the logout path, not the login heal.
+    { text = "Reset puts the camera back again.", button = "Reset", run = FollowRestore },
+    { text = FOLLOW_CONTROL, ask = true, leave = FollowControlLeft },
+    { text = "Open starts it once more.", button = "Open", run = FollowOpen },
+    { text = "While it is presenting, type /reload.", reload = true },
+    { text = "Comparing (after the /reload's logout restore).", auto = true, run = function() return FollowDiff("reload") end },
+    { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
+    { text = "Putting every camera CVar and the view back as at the start.", auto = true, run = FollowRestore },
+})
+
+-- 13. #51, the follow-up. The follow run (#468) found the camera not
+-- following even before any presentation, on cameraView 5, which every
+-- account's config-cache.wtf keeps as a non-default SET. Back to the
+-- client's default view: does the camera follow again, and does it survive a
+-- /reload? C_CVar.GetCVarDefault is in the 70959 dump.
+local function ViewDefault()
+    local get = G("C_CVar") and C_CVar.GetCVarDefault
+    local ok, d = false, nil
+    if type(get) == "function" then ok, d = pcall(get, "cameraView") end
+    return ok and d or nil
+end
+
+local function ViewRead(tag)
+    local line = ("%s: cameraView %s (default %s), cameraSmoothStyle %s"):format(tag, tostring(GetCVar("cameraView")),
+        tostring(ViewDefault()), tostring(GetCVar("cameraSmoothStyle")))
+    say("== view " .. line)
+    return line
+end
+
+-- how: "cvar" writes the CVar, "setview" calls SetView with the default.
+local function ViewToDefault(how)
+    local d = ViewDefault()
+    if d == nil then return false, "no default for cameraView (C_CVar.GetCVarDefault)" end
+    local before = GetCVar("cameraView")
+    local ok, err
+    if how == "cvar" then
+        ok, err = pcall(SetCVar, "cameraView", d)
+    else
+        local n = tonumber(d)
+        if not n then return false, "the default " .. tostring(d) .. " is not a view number" end
+        ok, err = pcall(SetView, n)
+    end
+    local line = ("%s to the default %s from %s: pcall %s %s, cameraView now %s"):format(how == "cvar" and "SetCVar" or "SetView",
+        tostring(d), tostring(before), tostring(ok), tostring(err), tostring(GetCVar("cameraView")))
+    say("  " .. line)
+    return ok, line
+end
+
+Probe:Steps("view", {
+    title = "Back to the default camera view (#51)",
+    { text = "Out of combat, somewhere open, Camera Following Style as before. Reading the view.", auto = true,
+      run = function() return ViewRead("start") end },
+    { text = FOLLOW_ASK .. " (The control: in the follow run it did not.)", ask = true },
+    { text = "Write sets the cameraView CVar to its default (don't touch the mouse; note whether the camera jumps).",
+      button = "Write", run = function() return ViewToDefault("cvar") end },
+    { text = "Did the camera move when you pressed Write? " .. FOLLOW_ASK, ask = true },
+    { text = "If it already follows, press Skip. Otherwise SetView switches to the default view.",
+      button = "SetView", run = function() return ViewToDefault("setview") end },
+    { text = "Did the camera move? " .. FOLLOW_ASK, ask = true },
+    { text = "Type /reload: does the default view stay?", reload = true },
+    { text = "Reading the view after the /reload.", auto = true, run = function() return ViewRead("reload") end },
+    { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
+})
+
+-- 14. #51, the gamepad lead. In gamepad mode Blizzard_Gamepad/Core.lua puts
+-- TEMP values on the two centring CVars (C_CVar.SetTempCVar), and the
+-- library SetCVars both during a presentation and back at the end. What
+-- does a plain SetCVar do to a temp value, and what is left once the temp is
+-- removed? Each layer gets a value the others don't have, so every read says
+-- which one it sees: the stored BASE, the gamepad's TEMP, the library's "0".
+-- C_CVar.SetTempCVar / RemoveTempCVar / GetCVarInfo are in the 70959 dump.
+local TEMP_CVARS = { "CameraKeepCharacterCentered", "CameraReduceUnexpectedMovement" }
+local TEMP_GAMEPAD = { CameraKeepCharacterCentered = "1", CameraReduceUnexpectedMovement = "0" }
+local TEMP_BASE = { CameraKeepCharacterCentered = "0", CameraReduceUnexpectedMovement = "1" }
+local tempCapture = {}       -- what the library would capture: the reads under the temp
+
+local function TempDB()
+    LibShowcaseProbeDB.temp = type(LibShowcaseProbeDB.temp) == "table" and LibShowcaseProbeDB.temp or {}
+    return LibShowcaseProbeDB.temp
+end
+
+local function TempApi(name)
+    local c = G("C_CVar")
+    return type(c) == "table" and type(c[name]) == "function" and c[name] or nil
+end
+
+local function TempRead(tag)
+    local parts = {}
+    for _, cvar in ipairs(TEMP_CVARS) do
+        local info = TempApi("GetCVarInfo")
+        local stored = ""
+        if info then
+            local ok, v = pcall(info, cvar)
+            stored = (" (info %s)"):format(ok and tostring(v) or "error")
+        end
+        parts[#parts + 1] = ("%s=%s%s"):format(cvar, tostring(GetCVar(cvar)), stored)
+    end
+    local line = tag .. ": " .. table.concat(parts, ", ")
+    say("== tempcvar " .. line)
+    return line
+end
+
+-- Gamepad mode, as Blizzard's InputUtil.IsGamepadUIEnabled() tells it
+-- (C_InputInterfaceStyle; Gamepad is 1). Its temps would make the start
+-- values unreadable: GetCVar reads the temp, not the stored value.
+local function InGamepadMode()
+    local style = G("C_InputInterfaceStyle")
+    if type(style) ~= "table" or type(style.GetCurrentStyle) ~= "function" then return false end
+    local types = G("Enum") and Enum.InputDeviceInterfaceType
+    local ok, current = pcall(style.GetCurrentStyle)
+    return ok and current == (type(types) == "table" and types.Gamepad or 1)
+end
+
+local function TempStart()
+    -- A temp already on would be taken for the stored value, and the Base
+    -- write would replace the real one unseen (Codex, PR #52).
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    -- The start values (`pending`) stay until a verified put-back clears
+    -- them: a run stopped after Base keeps the player's real ones for the
+    -- next run, or for /fp ls tempback (Codex, PR #52). `orig` is the older
+    -- probe's key, left behind even by a finished run: never trusted.
+    local db = TempDB()
+    if db.orig ~= nil then
+        db.orig = nil
+        say("  dropped an older probe's start values (they may be from a finished run)")
+    end
+    if type(db.pending) == "table" then
+        say("  keeping an earlier run's start values (its put-back never ran): /fp ls tempback restores them")
+    else
+        db.pending = {}
+        for _, cvar in ipairs(TEMP_CVARS) do db.pending[cvar] = GetCVar(cvar) end
+    end
+    local pad = G("C_GamePad") and C_GamePad.IsEnabled
+    local okPad, enabled = false, nil
+    if type(pad) == "function" then okPad, enabled = pcall(pad) end
+    say(("  SetTempCVar %s, RemoveTempCVar %s, GetCVarInfo %s; C_GamePad.IsEnabled %s, GamePadEnable %s")
+        :format(tostring(TempApi("SetTempCVar") ~= nil), tostring(TempApi("RemoveTempCVar") ~= nil),
+            tostring(TempApi("GetCVarInfo") ~= nil), okPad and tostring(enabled) or "n/a",
+            tostring(GetCVar("GamePadEnable"))))
+    if not (TempApi("SetTempCVar") and TempApi("RemoveTempCVar")) then
+        return false, "no C_CVar.SetTempCVar / RemoveTempCVar on this client"
+    end
+    return true, TempRead("start")
+end
+
+-- what: "base" stored values, "temp" the gamepad's temp values, "write" the
+-- library's presentation write ("0"), "restore" the library's restore of what
+-- it captured under the temp, "remove" the temp removed.
+local function TempDo(what)
+    -- Every write or removal checks the input mode first: switched to
+    -- gamepad mid-run, a Remove would take Blizzard's own temps away. The
+    -- step stays for Retry on mouse and keyboard (Codex, PR #52).
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    for _, cvar in ipairs(TEMP_CVARS) do
+        if what == "base" then
+            pcall(SetCVar, cvar, TEMP_BASE[cvar])
+        elseif what == "temp" then
+            pcall(TempApi("SetTempCVar"), cvar, TEMP_GAMEPAD[cvar])
+            tempCapture[cvar] = GetCVar(cvar)
+        elseif what == "write" then
+            pcall(SetCVar, cvar, "0")
+        elseif what == "restore" then
+            pcall(SetCVar, cvar, tempCapture[cvar])
+        elseif what == "remove" then
+            pcall(TempApi("RemoveTempCVar"), cvar)
+        end
+    end
+    return TempRead(what)
+end
+
+-- Everything back as it was when the procedure started, read back: a
+-- mismatch throws (the step stays, Retry). Not in gamepad mode: removing the
+-- temps would take Blizzard's own away (Codex, PR #52).
+local function TempPutBack()
+    local orig = TempDB().pending
+    if type(orig) ~= "table" then error("no start values saved", 0) end
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local wrong = {}
+    for _, cvar in ipairs(TEMP_CVARS) do
+        local remove = TempApi("RemoveTempCVar")
+        if remove then pcall(remove, cvar) end
+        if orig[cvar] ~= nil then
+            pcall(SetCVar, cvar, orig[cvar])
+            if GetCVar(cvar) ~= orig[cvar] then
+                wrong[#wrong + 1] = ("%s %s (want %s)"):format(cvar, tostring(GetCVar(cvar)), orig[cvar])
+            end
+        end
+    end
+    local line = TempRead("put back")
+    if #wrong > 0 then error("not put back: " .. table.concat(wrong, "; ") .. ". Retry", 0) end
+    TempDB().pending = nil
+    return true, line
+end
+
+Probe:Steps("tempcvar", {
+    title = "A library write over the gamepad's temp CVars (#51)",
+    { text = "Out of combat, mouse and keyboard (no controller needed). Reading the two centring CVars.", auto = true, run = TempStart },
+    -- The control (run #474 left the temp values after Remove): no write
+    -- between Temp and Remove.
+    { text = "The control. Base writes stored values the temp won't use (KeepCentered 0, ReduceUnexpected 1).", button = "Base",
+      run = function() return TempDo("base") end },
+    { text = "Temp puts the gamepad's temp values on top.", button = "Temp", run = function() return TempDo("temp") end },
+    { text = "Remove takes them off right away, with no write in between. Do the Base values come back?", button = "Remove",
+      run = function() return TempDo("remove") end },
+    { text = "Now with the library's writes. Base writes the stored values again.", button = "Base",
+      run = function() return TempDo("base") end },
+    { text = "Temp puts the gamepad's temp values on top (KeepCentered 1, ReduceUnexpected 0), as gamepad mode does.",
+      button = "Temp", run = function() return TempDo("temp") end },
+    { text = "Write does what a presentation does: SetCVar both to 0.", button = "Write", run = function() return TempDo("write") end },
+    { text = "Restore does what the end of a presentation does: SetCVar both back to what it read under the temp.",
+      button = "Restore", run = function() return TempDo("restore") end },
+    { text = "Remove takes the temp values off, as leaving gamepad mode does. A clean layer shows the Base values again.",
+      button = "Remove", run = function() return TempDo("remove") end },
+    -- The same through the library itself: a real presentation over the temp.
+    { text = "Base and Temp again, then Open starts a real presentation over them.", button = "Open", run = function()
+          TempDo("base"); TempDo("temp")
+          return OpenOrThrow()
+      end },
+    { text = "Close ends it.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return "closing"
+      end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Reading after the presentation, the temp still on.", auto = true, run = function() return TempRead("after presentation") end },
+    { text = "Remove takes the temp values off.", button = "Remove", run = function() return TempDo("remove") end },
+    { text = "Type /reload: what is stored?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return TempRead("reload") end },
+    { text = "Putting both CVars back as they were at the start.", auto = true, run = TempPutBack },
+})
+
+-- After a tempcvar run that was stopped before its last step.
+Probe:Command("tempback", function()
+    if type(TempDB().pending) ~= "table" then say("tempback: nothing to put back"); return end
+    local ok, a, b = pcall(TempPutBack)   -- ok, true, line; or false, the error
+    say("tempback: " .. tostring(ok and b or a))
+end, "put the centring CVars back after a stopped tempcvar run")
+
 Probe:Steps("rereg", {
     title = "The experimental-CVar popup, re-registered",
     { text = "Out of combat. Unregister leaves the popup's handler unregistered (the control).",
@@ -794,6 +1228,7 @@ ev:SetScript("OnEvent", function(_, event, a1)
             end,
             onForcedExit = function(reason)
                 say("  onForcedExit " .. tostring(reason))
+                forcedSeen[tostring(reason)] = true
                 if reason == "ui-shown" and window then window:Hide() end
             end,
         })
