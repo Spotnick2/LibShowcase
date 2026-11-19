@@ -55,7 +55,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `forceMounted` | false | |
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
-| `orbit`, `orbitSpeed` | true, 0.005 | |
+| `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed |
 | `savedViewSlot` | 5 | 2-5, the player's own view |
 | `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot` |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
@@ -286,6 +286,9 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 ## Deliberate differences from AltStable's block
 
 - One owner, enforced (AltStable had a single caller).
+- The orbit is scaled by the player's `cameraYawMoveSpeed` (#39); AltStable scaled only the entry
+  turn, so its orbit sped up or slowed down with the setting. The same at the default 180, where
+  `tests/test_parity.lua` runs.
 - Every restore drops **every** lifted frame (AltStable put back the sheet and GameTooltip; its
   menu put itself back).
 - Blizzard dialogs are never touched: AltStable lifted and raised its StaticPopups over the hidden

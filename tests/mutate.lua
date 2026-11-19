@@ -199,6 +199,10 @@ local M = {
     { "a cancelled countdown stays open", { { '    CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,\n', "" } } },
     { "a stopped timer stays open", { { '    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(timerType) end,\n', "" } } },
     { "a countdown's own time ignored", { { 'return "countdown", tonumber(timeRemaining) end', 'return "countdown" end' } } },
+    -- #39: the orbit follows cameraYawMoveSpeed
+    { "the orbit not scaled", { { "        cam.orbitSpeed = cfg.orbitSpeed * (180 / yawMoveSpeed)\n", "        cam.orbitSpeed = cfg.orbitSpeed\n" } } },
+    { "the scaled orbit speed kept after a restore", { { "    cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil\n    cam.orbitSpeed = nil\n",
+                                                         "    cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil\n" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
 }
 

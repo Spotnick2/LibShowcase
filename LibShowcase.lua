@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 6
+local MAJOR, MINOR = "LibShowcase-1.0", 7
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1098,7 +1098,11 @@ function I.Enter(inst, anchor)
         local degrees = math.abs(cfg.yawDegrees)
         local seconds = math.max(0.05, cfg.enterDuration)
         local speed = Clamp((degrees / yawMoveSpeed) / seconds, 0.10, 4.0, 1.0)
-        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, cfg.orbitSpeed
+        -- MoveView*Start's speed is a multiple of cameraYawMoveSpeed, so the
+        -- orbit is scaled like the turn: orbitSpeed is the speed at the
+        -- default 180, whatever the player's setting (#39).
+        cam.orbitSpeed = cfg.orbitSpeed * (180 / yawMoveSpeed)
+        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, cam.orbitSpeed
         I.StopYaw()
         I.ApplyYaw(dir * speed)
         I.Debug(inst, string.format("enter yaw: target=%d speed=%.3f yawMoveSpeed=%.1f",
@@ -1170,6 +1174,7 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
+    cam.orbitSpeed = nil
     -- The lifts stay while the UI is still hidden (a show owed after the
     -- lockdown, #42): PLAYER_REGEN_ENABLED drops them with it.
     if not st.uiHidden then I.DropAll() end
@@ -1202,7 +1207,7 @@ function I.Settle(cam)
     if cam.cfg.castAware and cam.cfg.presentationViewSlot then
         cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false
     end
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.cfg.orbitSpeed) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * (cam.orbitSpeed or cam.cfg.orbitSpeed)) end
 end
 
 function I.OnUpdate(elapsed)
@@ -1289,7 +1294,7 @@ function I.ResumeOrbitAfterCast()
     end
     if cam.mode ~= "castHold" then return end
     I.StopYaw()
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.cfg.orbitSpeed) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * (cam.orbitSpeed or cam.cfg.orbitSpeed)) end
     cam.mode, cam.elapsed, cam.castResetDuration, cam.resumeAfterReset = nil, 0, nil, nil
     lib.animFrame:Hide()
 end
