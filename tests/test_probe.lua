@@ -463,6 +463,43 @@ S.Answer(true)
 eq(rec.status, "done", "the view procedure finishes")
 rawset(_G, "C_CVar", hadCVar)
 
+-- #51's gamepad lead: a library write over a temp CVar. SetTempCVar,
+-- RemoveTempCVar and GetCVarInfo are in the 70959 dump. The client's layering
+-- is what the procedure measures; here a temp simply replaces the value and
+-- its removal is recorded.
+local removed = {}
+rawset(_G, "C_CVar", {
+    SetTempCVar = function(n, v) WoW.cvars[n] = v end,
+    RemoveTempCVar = function(n) removed[#removed + 1] = n end,
+    GetCVarInfo = function(n) return WoW.cvars[n] end,
+})
+WoW.cvars.CameraKeepCharacterCentered, WoW.cvars.CameraReduceUnexpectedMovement = "1", "0"
+fp("steps ls tempcvar")
+rec = record("tempcvar")
+check(tostring(rec.results[1].detail):find("start: CameraKeepCharacterCentered=1 (info 1)", 1, true), "tempcvar 1: read, with GetCVarInfo")
+S.Run()
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "01", "tempcvar 2: the base values")
+S.Run()
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "tempcvar 3: the gamepad's temp values")
+S.Run()
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "00", "tempcvar 4: the presentation's write")
+S.Run()
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "tempcvar 5: restored to what was read under the temp")
+S.Run()
+eq(#removed, 2, "tempcvar 6: both temps removed")
+S.Run()
+check(SC:IsActive() and win:IsShown(), "tempcvar 7: a real presentation over the temp")
+S.Run(); untilEnded()
+check(tostring(rec.results[9].detail):find("the presentation ended", 1, true), "tempcvar 9: ended")
+check(tostring(rec.results[10].detail):find("after presentation: CameraKeepCharacterCentered=1", 1, true), "tempcvar 10: read with the temp on")
+S.Run()
+eq(#removed, 4, "tempcvar 11: removed again")
+eq(rec.at, 12, "tempcvar 12: the /reload")
+S.Next()
+eq(WoW.cvars.CameraKeepCharacterCentered .. WoW.cvars.CameraReduceUnexpectedMovement, "10", "tempcvar 14: put back as at the start")
+eq(rec.status, "done", "the tempcvar procedure finishes")
+rawset(_G, "C_CVar", hadCVar)
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------

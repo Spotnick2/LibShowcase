@@ -31,6 +31,8 @@
 --             camera still follow the character (#51)?
 --   view      back to the client's default cameraView: does the camera follow
 --             again, and after a /reload (#51)?
+--   tempcvar  the library's SetCVar over the gamepad's temp values on the
+--             centring CVars: what does each layer read, and what is left (#51)?
 --
 -- Commands (/fp ls <command>), for a one-off:
 --   pitch [centring|off] | nudge 0|1 | combat | invite | show [N] | taint | prompts |
@@ -904,6 +906,122 @@ Probe:Steps("view", {
     { text = "Type /reload: does the default view stay?", reload = true },
     { text = "Reading the view after the /reload.", auto = true, run = function() return ViewRead("reload") end },
     { text = "After the /reload: " .. FOLLOW_ASK, ask = true },
+})
+
+-- 14. #51, the gamepad lead. In gamepad mode Blizzard_Gamepad/Core.lua puts
+-- TEMP values on the two centring CVars (C_CVar.SetTempCVar), and the
+-- library SetCVars both during a presentation and back at the end. What
+-- does a plain SetCVar do to a temp value, and what is left once the temp is
+-- removed? Each layer gets a value the others don't have, so every read says
+-- which one it sees: the stored BASE, the gamepad's TEMP, the library's "0".
+-- C_CVar.SetTempCVar / RemoveTempCVar / GetCVarInfo are in the 70959 dump.
+local TEMP_CVARS = { "CameraKeepCharacterCentered", "CameraReduceUnexpectedMovement" }
+local TEMP_GAMEPAD = { CameraKeepCharacterCentered = "1", CameraReduceUnexpectedMovement = "0" }
+local TEMP_BASE = { CameraKeepCharacterCentered = "0", CameraReduceUnexpectedMovement = "1" }
+local tempCapture = {}       -- what the library would capture: the reads under the temp
+
+local function TempDB()
+    LibShowcaseProbeDB.temp = type(LibShowcaseProbeDB.temp) == "table" and LibShowcaseProbeDB.temp or {}
+    return LibShowcaseProbeDB.temp
+end
+
+local function TempApi(name)
+    local c = G("C_CVar")
+    return type(c) == "table" and type(c[name]) == "function" and c[name] or nil
+end
+
+local function TempRead(tag)
+    local parts = {}
+    for _, cvar in ipairs(TEMP_CVARS) do
+        local info = TempApi("GetCVarInfo")
+        local stored = ""
+        if info then
+            local ok, v = pcall(info, cvar)
+            stored = (" (info %s)"):format(ok and tostring(v) or "error")
+        end
+        parts[#parts + 1] = ("%s=%s%s"):format(cvar, tostring(GetCVar(cvar)), stored)
+    end
+    local line = tag .. ": " .. table.concat(parts, ", ")
+    say("== tempcvar " .. line)
+    return line
+end
+
+local function TempStart()
+    local db = TempDB()
+    db.orig = {}
+    for _, cvar in ipairs(TEMP_CVARS) do db.orig[cvar] = GetCVar(cvar) end
+    local pad = G("C_GamePad") and C_GamePad.IsEnabled
+    local okPad, enabled = false, nil
+    if type(pad) == "function" then okPad, enabled = pcall(pad) end
+    say(("  SetTempCVar %s, RemoveTempCVar %s, GetCVarInfo %s; C_GamePad.IsEnabled %s")
+        :format(tostring(TempApi("SetTempCVar") ~= nil), tostring(TempApi("RemoveTempCVar") ~= nil),
+            tostring(TempApi("GetCVarInfo") ~= nil), okPad and tostring(enabled) or "n/a"))
+    if not (TempApi("SetTempCVar") and TempApi("RemoveTempCVar")) then
+        return false, "no C_CVar.SetTempCVar / RemoveTempCVar on this client"
+    end
+    return true, TempRead("start")
+end
+
+-- what: "base" stored values, "temp" the gamepad's temp values, "write" the
+-- library's presentation write ("0"), "restore" the library's restore of what
+-- it captured under the temp, "remove" the temp removed.
+local function TempDo(what)
+    for _, cvar in ipairs(TEMP_CVARS) do
+        if what == "base" then
+            pcall(SetCVar, cvar, TEMP_BASE[cvar])
+        elseif what == "temp" then
+            pcall(TempApi("SetTempCVar"), cvar, TEMP_GAMEPAD[cvar])
+            tempCapture[cvar] = GetCVar(cvar)
+        elseif what == "write" then
+            pcall(SetCVar, cvar, "0")
+        elseif what == "restore" then
+            pcall(SetCVar, cvar, tempCapture[cvar])
+        elseif what == "remove" then
+            pcall(TempApi("RemoveTempCVar"), cvar)
+        end
+    end
+    return TempRead(what)
+end
+
+-- Everything back as it was when the procedure started.
+local function TempPutBack()
+    local orig = TempDB().orig
+    if type(orig) ~= "table" then return false, "no start values saved" end
+    for _, cvar in ipairs(TEMP_CVARS) do
+        local remove = TempApi("RemoveTempCVar")
+        if remove then pcall(remove, cvar) end
+        if orig[cvar] ~= nil then pcall(SetCVar, cvar, orig[cvar]) end
+    end
+    return true, TempRead("put back")
+end
+
+Probe:Steps("tempcvar", {
+    title = "A library write over the gamepad's temp CVars (#51)",
+    { text = "Out of combat, mouse and keyboard (no controller needed). Reading the two centring CVars.", auto = true, run = TempStart },
+    { text = "Base writes stored values the temp won't use (KeepCentered 0, ReduceUnexpected 1).", button = "Base",
+      run = function() return TempDo("base") end },
+    { text = "Temp puts the gamepad's temp values on top (KeepCentered 1, ReduceUnexpected 0), as gamepad mode does.",
+      button = "Temp", run = function() return TempDo("temp") end },
+    { text = "Write does what a presentation does: SetCVar both to 0.", button = "Write", run = function() return TempDo("write") end },
+    { text = "Restore does what the end of a presentation does: SetCVar both back to what it read under the temp.",
+      button = "Restore", run = function() return TempDo("restore") end },
+    { text = "Remove takes the temp values off, as leaving gamepad mode does. A clean layer shows the Base values again.",
+      button = "Remove", run = function() return TempDo("remove") end },
+    -- The same through the library itself: a real presentation over the temp.
+    { text = "Base and Temp again, then Open starts a real presentation over them.", button = "Open", run = function()
+          TempDo("base"); TempDo("temp")
+          return FollowOpen()
+      end },
+    { text = "Close ends it.", button = "Close", run = function()
+          if window and window:IsShown() then window:Hide() end
+          return "closing"
+      end },
+    { text = "Waiting for the presentation to end.", timeout = 15, wait = PresentationEnded },
+    { text = "Reading after the presentation, the temp still on.", auto = true, run = function() return TempRead("after presentation") end },
+    { text = "Remove takes the temp values off.", button = "Remove", run = function() return TempDo("remove") end },
+    { text = "Type /reload: what is stored?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return TempRead("reload") end },
+    { text = "Putting both CVars back as they were at the start.", auto = true, run = TempPutBack },
 })
 
 Probe:Steps("rereg", {
