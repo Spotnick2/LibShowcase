@@ -1,139 +1,82 @@
--- wow_stubs.lua: a minimal WoW: Forever mock for LibShowcase's Lua 5.1 tests.
--- dofile("tests/wow_stubs.lua") FIRST in every test; drive it via the WoW table.
+-- wow_stubs.lua: LibShowcase's part of the WoW: Forever mock for its Lua 5.1
+-- tests. dofile("tests/wow_stubs.lua") FIRST in every test; drive it via the
+-- WoW table.
+--
+-- The mechanics are WowTestKit's core (tests/kit.lua loads it at the commit
+-- and build tests/kit.pin names; its README is the reference): strict
+-- globals, CreateFrame and the widget method recorder (WoW.methodsCalled,
+-- checked by Kit.checkMethods) with each widget's call log (w._log), events
+-- checked against the build, OnShow / OnHide, OnUpdate ticks, timers,
+-- hooksecurefunc, print, combat lockdown (WoW.combat) and protected frames
+-- refusing calls in combat (WoW.blocked). This file adds only what the
+-- library and its tests use beyond them, each global confirmed in the API
+-- dump. UnitBuff and NUM_CHAT_WINDOWS are NOT in the dump, so they read as
+-- nil (AltStable's frozen block reads them).
 --
 -- What it models, on purpose:
--- - STRICT globals: reading any global it does not define is an error. Each
---   stub is a name confirmed in the API dump (forever-api-1.60.1.70338.md);
---   defining something Forever lacks is how a missing API survives into a
---   build. UnitBuff and NUM_CHAT_WINDOWS are NOT in the dump, so they read as
---   nil (AltStable's frozen block reads them).
 -- - The CAMERA and CVARS as plain state, and every global call that changes
 --   them logged IN ORDER (WoW.calls), so test_parity can compare AltStable's
 --   block with the library call for call.
 -- - SetUIVisibility hides UIParent, and visibility walks the parent chain: a
 --   frame under a hidden UIParent is not visible and its OnUpdate does not run.
 -- - COMBAT: InCombatLockdown() is FALSE inside PLAYER_REGEN_DISABLED (MEASURED
---   70205) and true after it. A PROTECTED frame refuses SetParent, SetScale,
---   Show and Hide in combat (WoW.blocked records the attempt, as the client's
---   ADDON_ACTION_BLOCKED would).
+--   70205) and true after it (WoW.enterCombat / WoW.leaveCombat). A PROTECTED
+--   frame refuses SetParent too, besides the kit's WoW.PROTECTED methods.
 -- - The experimental-CVar popup: a test_* write while the internal event is
 --   registered "shows" it (WoW.popupShown).
 -- - Blizzard_StaticPopup: StaticPopup_Show, StaticPopupSpecial_Show and
 --   StaticPopup_ForEachShownDialog over a pool of dialog frames, fresh each
 --   reset (as SetUIVisibility is), so a hook from an earlier load is gone.
--- - Every widget method called is recorded (WoW.methodsCalled) for
---   test_methods.lua, and logged per widget with its arguments (w._log).
 
-WoW = {}
-WoW.DUMP = os.getenv("LIBSHOWCASE_API_DUMP") or "C:/Projects/WoW/References/forever-api-1.60.1.70338.md"
+dofile("tests/kit.lua")
+local Methods = WoW.Methods
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 
 --------------------------------------------------------------------------------
--- Widgets
+-- Widgets: what differs from the kit's core
 --------------------------------------------------------------------------------
 
-local Methods = {}
+-- The library lifts frames with SetParent(nil) and never reparents a
+-- protected one in combat: the old stub refused it, and so does this one.
+WoW.PROTECTED.SetParent = true
 
-local widgetMT = {
-    __index = function(w, k)
-        if type(k) ~= "string" or not k:match("^%u") then return nil end   -- fields read as nil
-        return function(self, ...)
-            WoW.methodsCalled[self._type .. ":" .. k] = true
-            table.insert(self._log, { k, n = select("#", ...), ... })
-            local impl = Methods[k]
-            if impl then return impl(self, ...) end
-            return nil
-        end
-    end,
-}
-
-local function newWidget(wtype, parent, name)
-    local w = setmetatable({ _type = wtype, _parent = parent, _shown = true, _points = {}, _log = {},
-                             _scale = 1, _strata = "MEDIUM", _level = 1, _scripts = {}, _events = {},
-                             _name = name }, widgetMT)
-    return w
+-- WowTestKit #99: the core's SetParent neither moves the frame level nor
+-- fires OnShow / OnHide. This one does both, as the old stub did:
+-- - the level goes to just above the new parent's, as the client does for a
+--   frame without a fixed level. The mutation run relies on it: a drop that
+--   didn't put the recorded level back would otherwise pass ("level not
+--   restored", tests/mutate.lua).
+-- - test_lease relies on the scripts: a lifted frame put back under a hidden
+--   UIParent gets its OnHide half way through the drop, which may drop it
+--   again (LibShowcase.lua, I.DropRecord). The core's SetParent runs first
+--   (it takes the subtree's visibility as reported); the scripts then fire
+--   where it changed, parents first.
+local coreSetParent = Methods.SetParent
+local function reported(w, list)
+    list[#list + 1] = { w, w._vis }
+    for _, c in ipairs(w._children or {}) do reported(c, list) end
+    return list
 end
-
-local function visible(w)
-    while w do
-        if not w._shown then return false end
-        w = w._parent
-    end
-    return true
-end
-
-local function blocked(w, what)
-    if WoW.inCombat and w._protected then
-        table.insert(WoW.blocked, what)
-        error("ADDON_ACTION_BLOCKED: " .. what .. " on a protected frame in combat", 3)
-    end
-end
-
-local function fire(w, script, ...)
-    local fn = w._scripts[script]
-    if fn then fn(w, ...) end
-end
-
--- Visibility changes fire OnShow/OnHide on the frame and its shown children,
--- as the client does (only on an actual change).
-local function setVisible(w, before)
-    local now = visible(w)
-    if before and not now then fire(w, "OnHide") elseif now and not before then fire(w, "OnShow") end
-end
-
-function CreateFrame(ftype, name, parent, template)
-    local w = newWidget(ftype, parent, name)
-    w._template = template
-    table.insert(WoW.frames, w)
-    if name then rawset(_G, name, w) end
-    return w
-end
-
-function Methods.Show(w) blocked(w, "Show"); local b = visible(w); w._shown = true; setVisible(w, b) end
-function Methods.Hide(w) blocked(w, "Hide"); local b = visible(w); w._shown = false; setVisible(w, b) end
-function Methods.IsShown(w) return w._shown end
-function Methods.IsVisible(w) return visible(w) end
--- Reparenting moves the frame level to just above the new parent's, as the
--- client does for a frame without a fixed level.
 function Methods.SetParent(w, p)
-    blocked(w, "SetParent")
-    local b = visible(w)
-    w._parent = p
+    local before = reported(w, {})
+    coreSetParent(w, p)
     w._level = (p and p._level or 0) + 1
-    setVisible(w, b)
-end
-function Methods.GetParent(w) return w._parent end
-function Methods.SetScale(w, s) blocked(w, "SetScale"); w._scale = s end
-function Methods.GetScale(w) return w._scale end
-function Methods.GetEffectiveScale(w)
-    local s, p = w._scale, w._parent
-    while p do s = s * p._scale; p = p._parent end
-    return s
-end
-function Methods.SetFrameStrata(w, s) w._strata = s end
-function Methods.GetFrameStrata(w) return w._strata end
-function Methods.SetFrameLevel(w, l) w._level = l end
-function Methods.GetFrameLevel(w) return w._level end
-function Methods.SetPoint(w, ...) table.insert(w._points, { ... }) end
-function Methods.ClearAllPoints(w) w._points = {} end
-function Methods.GetNumPoints(w) return #w._points end
-function Methods.GetPoint(w, i) local p = w._points[i or 1]; if p then return unpack(p) end end
-function Methods.IsProtected(w) return w._protected == true, false end
-function Methods.SetScript(w, script, fn) w._scripts[script] = fn end
-function Methods.GetScript(w, script) return w._scripts[script] end
-function Methods.HookScript(w, script, fn)
-    local prev = w._scripts[script]
-    w._scripts[script] = function(...)
-        if prev then prev(...) end
-        fn(...)
+    for _, e in ipairs(before) do
+        local node, was = e[1], e[2]
+        if node._vis ~= was then
+            local script = node._scripts[node._vis and "OnShow" or "OnHide"]
+            if script then script(node) end
+        end
     end
 end
-function Methods.RegisterEvent(w, ev) w._events[ev] = true end
-function Methods.RegisterUnitEvent(w, ev, unit) w._events[ev] = unit or true end
-function Methods.UnregisterEvent(w, ev) w._events[ev] = nil end
-function Methods.IsEventRegistered(w, ev) return w._events[ev] ~= nil end
-function Methods.ClearFocus(w) w._focus = false end
+
+-- A subtree's visibility taken as reported, without its scripts: what
+-- SetUIVisibility does to UIParent here, as the old stub did.
+local function quiet(w)
+    w._vis = Methods.IsVisible(w)
+    for _, c in ipairs(w._children or {}) do quiet(c) end
+end
 
 --------------------------------------------------------------------------------
 -- State
@@ -156,13 +99,8 @@ WoW.DEFAULT_CVARS = {
     cameraYawMoveSpeed = "180",
 }
 
-function WoW.reset()
-    WoW.frames = {}
-    WoW.methodsCalled = {}
+table.insert(WoW.onReset, function()
     WoW.calls = {}
-    WoW.blocked = {}
-    WoW.timers = {}
-    WoW.inCombat = false
     WoW.loggedIn = false
     WoW.mounted = false
     WoW.race = { "Human", "Human", 1 }
@@ -172,15 +110,17 @@ function WoW.reset()
     WoW.internal = { [POPUP_EVENT] = "blizzard" }   -- who handles the popup event
     WoW.popupShown = 0
     WoW.eventFrames = {}                            -- GetFramesRegisteredForEvent's answer
-    WoW.chatOut = {}
     WoW.now = 1000                                  -- GetTime(); WoW.tick and WoW.advance move it
     -- Prompts the client reports open, whatever events the library saw:
     -- readyCheck = { status = "waiting", left = 30 }; lootRolls = { [rollID] = ms left }.
     WoW.readyCheck, WoW.lfgProposal, WoW.roleCheck, WoW.lootRolls = nil, false, false, {}
 
-    UIParent = newWidget("Frame", nil, "UIParent")
-    WorldFrame = newWidget("Frame", nil, "WorldFrame")
-    GameTooltip = newWidget("GameTooltip", UIParent, "GameTooltip")
+    -- A fresh UIParent each reset, as the old stub had: an earlier section's
+    -- hidden UI or lifted frames don't carry over.
+    UIParent = WoW.newWidget("Frame", nil, "UIParent")
+    UIParent._level = 0
+    WorldFrame = WoW.newWidget("Frame", nil, "WorldFrame")
+    GameTooltip = WoW.newWidget("GameTooltip", UIParent, "GameTooltip")
     GameTooltip._strata = "TOOLTIP"
 
     -- A fresh engine function each reset, so hooks from an earlier load don't
@@ -188,6 +128,7 @@ function WoW.reset()
     SetUIVisibility = function(v)
         log("SetUIVisibility", v)
         UIParent._shown = v and true or false
+        quiet(UIParent)
     end
 
     -- Blizzard_StaticPopup (FrameXML, not the engine): a pool of dialogs under
@@ -203,7 +144,7 @@ function WoW.reset()
         local d
         for _, x in ipairs(WoW.dialogs) do if not x._shown then d = x; break end end
         if not d then
-            d = newWidget("Frame", UIParent, "StaticPopup" .. (#WoW.dialogs + 1))
+            d = WoW.newWidget("Frame", UIParent, "StaticPopup" .. (#WoW.dialogs + 1))
             d._shown = false
             d._strata = "DIALOG"
             WoW.dialogs[#WoW.dialogs + 1] = d
@@ -211,22 +152,24 @@ function WoW.reset()
         d.which = which
         table.insert(WoW.shownDialogs, d)
         d._parent, d._shown = UIParent, true
+        d._vis = Methods.IsVisible(d)
         return d
     end
     StaticPopupSpecial_Show = function(d)
         d.special = true
         table.insert(WoW.shownDialogs, d)
         d._parent, d._shown = UIParent, true
+        d._vis = Methods.IsVisible(d)
     end
     StaticPopup_ForEachShownDialog = function(fn)
         for _, d in ipairs(WoW.shownDialogs) do fn(d) end
         return nil
     end
-end
+end)
 
 -- Close a dialog as Blizzard does (accept, cancel, Escape).
 function WoW.closeDialog(d)
-    d._shown = false
+    d._shown, d._vis = false, false
     for i, x in ipairs(WoW.shownDialogs) do
         if x == d then table.remove(WoW.shownDialogs, i); break end
     end
@@ -237,55 +180,19 @@ function WoW.resetLibStub()
     rawset(_G, "LibStub", nil)
 end
 
--- Run every visible frame's OnUpdate `n` times.
-function WoW.tick(dt, n)
-    for _ = 1, n or 1 do
-        WoW.now = WoW.now + (dt or 0)
-        for _, w in ipairs(WoW.frames) do
-            local fn = w._scripts.OnUpdate
-            if fn and visible(w) then fn(w, dt) end
-        end
-    end
-end
-
--- Fire an event at every frame registered for it.
-function WoW.fire(event, ...)
-    local unit = ...
-    for _, w in ipairs(WoW.frames) do
-        local reg = w._events[event]
-        if reg and (reg == true or reg == unit) then
-            local fn = w._scripts.OnEvent
-            if fn then fn(w, event, ...) end
-        end
-    end
-end
-
 -- Combat as the client runs it: REGEN_DISABLED handlers are still unlocked.
 function WoW.enterCombat()
     WoW.fire("PLAYER_REGEN_DISABLED")
-    WoW.inCombat = true
+    WoW.combat = true
 end
 function WoW.leaveCombat()
-    WoW.inCombat = false
+    WoW.combat = false
     WoW.fire("PLAYER_REGEN_ENABLED")
-end
-
-function WoW.flushTimers()
-    local t = WoW.timers
-    WoW.timers = {}
-    for _, fn in ipairs(t) do fn() end
 end
 
 --------------------------------------------------------------------------------
 -- Globals (each confirmed in the API dump)
 --------------------------------------------------------------------------------
-
-strmatch = string.match   -- LibStub uses it
-
--- Time passing with no frame drawn (no OnUpdate runs).
-function WoW.advance(seconds) WoW.now = WoW.now + seconds end
-
-function GetTime() return WoW.now end
 
 -- Prompt getters: in the dump by NAME only (the _G walk), no signature. The
 -- shapes are Retail's, UNMEASURED on Forever (/lsprobe prompts measures them).
@@ -302,7 +209,6 @@ function GetActiveLootRollIDs()
     return t
 end
 function GetLootRollTimeLeft(id) return WoW.lootRolls[id] or 0 end
-function InCombatLockdown() return WoW.inCombat end
 function IsLoggedIn() return WoW.loggedIn end
 function IsMounted() return WoW.mounted end
 function UnitRace(unit) return WoW.race[1], WoW.race[2], WoW.race[3] end
@@ -342,22 +248,9 @@ GameEvent = {
     HandleExperimentalCVarConfirmationNeeded = function() WoW.popupShown = WoW.popupShown + 1 end,
 }
 
-C_Timer = { After = function(_, fn) table.insert(WoW.timers, fn) end }
-
-DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) table.insert(WoW.chatOut, m) end }
-
--- Post-hook, as the client does: the original runs first. Both forms.
-function hooksecurefunc(a, b, c)
-    local host, name, fn
-    if type(a) == "table" then host, name, fn = a, b, c else host, name, fn = _G, a, b end
-    local prev = host[name]
-    if type(prev) ~= "function" then error("Attempt to hook a nonexistent function: " .. tostring(name), 2) end
-    rawset(host, name, function(...)
-        local r = { prev(...) }
-        fn(...)
-        return unpack(r)
-    end)
-end
+-- The default chat frame prints, as print does on the client (the kit's print
+-- checks every line for a stray "|").
+DEFAULT_CHAT_FRAME = { AddMessage = function(_, m) print(m) end }
 
 WoW.reset()
 
@@ -369,7 +262,7 @@ local allowNil = {
     AltStable = true, AltStableConfig = true,
     LIBSHOWCASE_MARK = true,              -- the synthetic newer copy's call counters
 }
-setmetatable(_G, { __index = function(_, k)
-    if allowNil[k] or (type(k) == "string" and k:match("^ChatFrame%d+EditBox$")) then return nil end
-    error("read of undefined global '" .. tostring(k) .. "' (not stubbed: is it in the API dump?)", 2)
-end })
+-- AltStable's block reads the chat edit boxes by name, up to NUM_CHAT_WINDOWS
+-- or 10; a test makes the ones it needs.
+for i = 1, 10 do allowNil["ChatFrame" .. i .. "EditBox"] = true end
+Kit.strict(allowNil)

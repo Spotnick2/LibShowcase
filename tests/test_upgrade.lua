@@ -174,7 +174,7 @@ do
     check(not hasCall("RegisterInternalEvent"), "  which never re-registers the popup")
     -- The OnUpdate script.
     local o0 = mark("OnUpdate")
-    WoW.tick(0.1, 1)
+    ticks(0.1, 1)
     eq(mark("OnUpdate"), o0 + 1, "the OnUpdate script runs the newer code, once per frame")
     -- The event script.
     local e0 = mark("OnEvent")
@@ -190,7 +190,7 @@ do
     -- inside it (one hook run per SetUIVisibility call, never two).
     eq(mark("OnSetUIVisibility"), h0 + 3, "  and on Escape")
     eq(mark("Exit"), n0 + 1, "  which exits through the newer copy")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not A:IsOwner(), "the presentation finishes under the newer copy")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "and restores what the older copy changed")
     -- The StaticPopup hooks the older copy installed.
@@ -299,7 +299,7 @@ do
     for k, v in pairs(WoW.cvars) do found[k] = v end
     local win = newWindow()
     check(A:Enter(win), rN .. " presents")
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     if R >= 4 then eq(WoW.cvars.UnitNameOwn, "0", "  with the world names hidden") end
     local held = shared(lib)
     local opts, enter = A.opts, lib.impl.Enter
@@ -350,9 +350,9 @@ do
     eq(exited[#exited], true, "  and the consumer's own A:Exit succeeds")
     check(mark("Exit") > x0, "  through the newer Exit")
     local o0 = mark("OnUpdate")
-    WoW.tick(0.1, 1)
+    ticks(0.1, 1)
     eq(mark("OnUpdate"), o0 + 1, rN .. "'s OnUpdate script runs the newer OnUpdate (the exit animation)")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not A:IsActive() and not A:IsOwner(), "its exit finishes and releases")
     local same, which = sameCVars(found, WoW.cvars)
     check(same, "every CVar is back as " .. rN .. " found it, none added: " .. tostring(which))

@@ -37,7 +37,7 @@ do
     A:Exit("closed")
     ok, why = B:Enter(wb)
     check(ok == false and why == "busy", "still busy during A's exit animation")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not A:IsOwner(), "A's exit finished: the lease is free")
     check(B:Enter(wb), "now B enters")
     B:ForceRestore()
@@ -84,9 +84,11 @@ do
     -- drop must find nothing to undo, and the other records must survive.
     SetUIVisibility(false)                    -- the player's Alt+Z
     local f1, f2 = newWindow(), newWindow()
-    f1:SetScript("OnHide", function(self) SC:Drop(self) end)
+    local hides = 0
+    f1:SetScript("OnHide", function(self) hides = hides + 1; SC:Drop(self) end)
     SC:Lift(f1); SC:Lift(f2)
     SC:Drop(f1)
+    eq(hides, 1, "the drop fired the frame's OnHide (the stub's SetParent: WowTestKit #99)")
     eq(f1:GetParent(), UIParent, "a drop re-entered from its own OnHide puts the frame back")
     check(SC:IsLifted(f2) and f2:GetParent() == nil, "  and leaves the other lift's record alone")
     SC:Drop(f2)
@@ -120,7 +122,7 @@ do
     eq(WoW.cvars.test_cameraOverShoulder, "0", "  offset restored")
     eq(#WoW.blocked, 0, "  nothing was blocked: done before the lockdown")
     eq(reasons[1], "combat", "  the owner is told")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "the dead exit animation writes nothing more")
     local ok, why = SC:Enter(win)
     check(ok == false and why == "combat", "no showcase in combat")
@@ -153,7 +155,7 @@ do
     SC:Lift(plain)
     eq(secure:GetParent(), nil, "the protected window is lifted (out of combat)")
 
-    WoW.inCombat = true                      -- e.g. Escape pressed mid-fight
+    WoW.combat = true                      -- e.g. Escape pressed mid-fight
     SetUIVisibility(true)
     eq(reasons[1], "ui-shown", "the owner is told")
     check(UIParent:IsShown(), "the UI is back")
@@ -209,7 +211,7 @@ do
         onForcedExit = function(r) forced[#forced + 1] = r end })
     local win = newWindow("MEDIUM")
     SC:Enter(win)
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     local yaw = WoW.camera.yaw
     check(not UIParent:IsShown(), "presenting with the UI hidden")
 
@@ -238,7 +240,7 @@ do
     WoW.closeDialog(d); WoW.closeDialog(d2)
 
     SC:Exit("closed")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not SC:IsOwner(), "the exit still finishes and releases")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "  restoring the camera")
     untouched(d, "after the restore")

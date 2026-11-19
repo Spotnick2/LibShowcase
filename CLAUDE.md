@@ -70,7 +70,7 @@ showed the popup `TAINTED by` the addon (`issecurevariable(dialog, "which")`).
 
 ## Upgrade rules (several addons ship copies; the newest one wins, and it may not be yours)
 
-These follow `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
+These follow `C:\Projects\WoW\References\Docs\EMBEDDED-LIBRARIES.md` §5. Treat it as fact.
 
 - **Dispatch at call time.** Instance methods live in `lib.methods` (the instances' shared
   `__index`, a plain table) as `function(self, ...) return lib.impl[name](self, ...) end`. The
@@ -103,11 +103,24 @@ ignores), and anything MEASURED behind it. r3 and r4 are the models. The release
 
 ## Testing
 
-Plain Lua 5.1, no dependencies, modelled on LibGlass's harness: `tests\wow_stubs.lua` (strict
-globals, every stubbed global confirmed in the API dump; camera, CVars, `SetUIVisibility`,
-combat lockdown and protected frames modelled; every global camera call logged in order),
-`tests\harness.lua` (loads the library **through the XML's order**), `tests\run.ps1` (`luac -p` +
-every `tests\test_*.lua`), `tests\mutate.lua` (mutation run; not part of the suite).
+Plain Lua 5.1, modelled on LibGlass's harness. The test scaffolding is WowTestKit
+(`C:\Projects\WoW\WowTestKit`; its README is the reference) at the commit and client build
+`tests\kit.pin` names. `tests\run.ps1` puts that commit in `%LOCALAPPDATA%\WowTestKit\<sha>` and
+hands off to the kit's runner (`luac -p` on the XML's files and the tests, then every
+`tests\test_*.lua`). `tests\kit.lua`, `kit.ps1` and `fetch_kit.sh` are the kit's bootstrap
+copies: never edit them here. A kit need is an issue on the kit, worked around in
+`tests\wow_stubs.lua` with a `-- WowTestKit #N:` comment meanwhile (today #99: `SetParent` moves
+the frame level and fires `OnShow` / `OnHide`). `tests\run.ps1 -KitDev` runs against the `..\WowTestKit` working copy
+instead of the pin. The repo has no CI.
+
+- `tests\wow_stubs.lua`: this library's part of the mock, every stubbed global confirmed in the
+  API dump: camera, CVars, `SetUIVisibility`, the StaticPopup pool, `WoW.enterCombat` /
+  `leaveCombat`, `SetParent` refused on a protected frame in combat; every global camera call
+  logged in order (`WoW.calls`). Strict globals, widgets, events (checked against the build),
+  timers and combat lockdown (`WoW.combat`) are the kit's.
+- `tests\harness.lua` loads the library **through the XML's order**; `ticks(dt, n)` runs `n`
+  frames. `tests\mutate.lua` is the mutation run, not part of the suite (run `tests\run.ps1`
+  once first, so the pinned kit is in the cache).
 
 - **Behaviour parity:** `tests/test_parity.lua` runs AltStable's original block (frozen as
   `tests/fixtures/altstable_camera.lua`, `SheetUI.lua:196-911` @ AltStable `5297196`) and the
@@ -116,7 +129,7 @@ every `tests\test_*.lua`), `tests\mutate.lua` (mutation run; not part of the sui
   `tests/fixtures/LibShowcase-rN/` (the tag's XML and every file it lists) loaded with the current one, both orders), isolation (two instances), single owner,
   the camera-OFF lease, combat during cleanup, a protected frame's deferred drop, the crash
   self-heal round trip, Blizzard dialogs (never touched; the UI brought back, the presentation
-  kept), widget methods against the dump.
+  kept), widget methods against the pinned build (`Kit.checkMethods`).
 - **Mutation-test new tests** (`lua tests\mutate.lua`): every mutation must turn the suite red.
 
 ## Toolchain and commands
@@ -124,15 +137,18 @@ every `tests\test_*.lua`), `tests\mutate.lua` (mutation run; not part of the sui
 ```powershell
 & 'C:\Program Files (x86)\Lua\5.1\luac.exe' -p LibShowcase.lua   # syntax check; silent on success
 pwsh tests\run.ps1                                               # luac -p + every tests\test_*.lua
+pwsh tests\run.ps1 -KitDev                                       # against ..\WowTestKit, not the pin
 & 'C:\Program Files (x86)\Lua\5.1\lua.exe' tests\mutate.lua      # mutation run
 ```
 
 ## References
 
-- `C:\Projects\WoW\References\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
-- `C:\Projects\WoW\References\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
+- `C:\Projects\WoW\References\Docs\EMBEDDED-LIBRARIES.md`: the embedded-library guide.
+- `C:\Projects\WoW\References\Docs\PORTING-TBC-TO-FOREVER.md`: measured client facts (the camera section:
   "A CVar that does nothing may be obeyed and then overruled").
-- `C:\Projects\WoW\References\forever-api-1.60.1.70338.md`: the API dump (MEASURED notes name the build they were taken on).
+- `C:\Projects\WoW\References\Forever\api\forever-api-1.60.1.<build>.md`: the API dumps; use the newest
+  (70959 when the tests moved onto the kit, the build `tests\kit.pin` tests). MEASURED notes name
+  the build they were taken on.
 - `C:\Projects\WoW\AltStable` (`docs/forever-api-notes.md`, CVars section) and
   `C:\Projects\WoW\PortalRoulette\docs\FOREVER-PROBE.md`: where the camera facts were measured.
 

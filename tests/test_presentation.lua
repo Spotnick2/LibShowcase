@@ -45,7 +45,7 @@ do
 
     -- The animation runs from WorldFrame, so it keeps ticking with the UI hidden.
     check(lib.animFrame:GetParent() == WorldFrame, "the OnUpdate runner hangs from WorldFrame")
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     eq(WoW.camera.yaw, -0.005, "after the swing: the slow orbit, leftward")
     check(not lib.animFrame:IsShown(), "and the runner stops")
 
@@ -57,7 +57,7 @@ do
     eq(GameTooltip:GetParent(), UIParent, "GameTooltip back")
     eq(WoW.camera.view, 5, "the saved view is snapped back")
     check(SC:IsActive(), "the presentation is still winding down")
-    WoW.tick(0.1, 5)
+    ticks(0.1, 5)
     check(not SC:IsActive(), "and ends after exitDuration")
     check(not SC:IsOwner(), "giving the showcase back")
     local same, which = sameCVars(before, WoW.cvars)
@@ -120,7 +120,7 @@ do
         if c == "SetCVar(CameraKeepCharacterCentered, 1)" then restoredFirst = i end
     end
     check(restoredFirst, "  after finishing the exit (the old capture restored)")
-    WoW.tick(0.1, 30)
+    ticks(0.1, 30)
     check(SC:IsActive(), "and the old exit does not fire with the window open")
     SC:ForceRestore("test")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "the fresh capture restores the player's value")
@@ -132,11 +132,11 @@ end
 do
     local lib = freshLibrary()
     local SC = lib:New({ owner = "A" })
-    WoW.inCombat = true
+    WoW.combat = true
     local ok, why = SC:Enter(newWindow())
     check(ok == false and why == "combat", "in combat: false, \"combat\"")
     check(not SC:IsOwner(), "  and no lease taken")
-    WoW.inCombat = false
+    WoW.combat = false
     local realSaveView = SaveView
     rawset(_G, "SaveView", false)        -- absent on this client
     ok, why = SC:Enter(newWindow())
@@ -190,7 +190,7 @@ do
     SetUIVisibility(true)
     eq(lib2.state.cam.mode, "exit", "with no handler the library exits by itself")
     check(not SC2:IsGameUIHidden() and w2:GetParent() == UIParent, "  and drops what it lifted")
-    WoW.tick(0.1, 10)
+    ticks(0.1, 10)
     check(not SC2:IsOwner(), "  and finishes")
 end
 
@@ -241,7 +241,9 @@ do
     local realGameEvent = GameEvent
     rawset(_G, "GameEvent", false)       -- absent on this client
     local f = CreateFrame("Frame")
-    f:RegisterEvent("EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED")
+    -- No dump lists it as a frame event (GameEvent's internal event), so
+    -- RegisterEvent refuses the name: the registration is set directly.
+    f._events.EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED = true
     WoW.eventFrames.EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED = { f }
     eq(lib.SuppressExperimentalCVarPopup(), 1, "without GameEvent: the frame fallback (varargs)")
     check(not f:IsEventRegistered("EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"), "  unregisters the owner")
@@ -261,7 +263,7 @@ do
     eq(WoW.camera.pitchlimit, 1, "pitchLimit")
     eq(WoW.cvars.cameraViewBlendStyle, "2", "viewBlendStyle")
     eq(WoW.popupShown, 0, "no popup for the test_ pitch write either")
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     check(hasCall("DoEmote(SALUTE)"), "salute once settled")
     SC:ForceRestore()
     local same, which = sameCVars(before, WoW.cvars)
@@ -285,7 +287,7 @@ do
     local SC = lib:New({ owner = "PortalRoulette", castAware = true })
     SC:Enter()
     check(lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "cast events registered while presenting")
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     eq(WoW.camera.savedViews[4], WoW.camera.zoom, "the settled view is saved in slot 4")
     check(WoW.camera.yaw ~= nil, "orbiting")
     WoW.fire("UNIT_SPELLCAST_START", "target")
@@ -303,7 +305,7 @@ do
     eq(lib.state.cam.mode, "castReset", "no saved view: a reset swing")
     WoW.fire("UNIT_SPELLCAST_CHANNEL_STOP", "player")
     eq(lib.state.cam.mode, "castReset", "a stop during the swing waits for it")
-    WoW.tick(0.1, 5)
+    ticks(0.1, 5)
     eq(WoW.camera.yaw, -0.005, "  then resumes the orbit")
     SC:ForceRestore()
     check(not lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "cast events dropped on restore")
@@ -313,7 +315,7 @@ do
     rawset(lib.eventFrame, "RegisterUnitEvent", false)
     SC = lib:New({ owner = "PortalRoulette", castAware = true })
     SC:Enter()
-    WoW.tick(0.1, 16)
+    ticks(0.1, 16)
     WoW.fire("UNIT_SPELLCAST_START", "target")
     eq(WoW.camera.yaw, -0.005, "without RegisterUnitEvent another unit's cast is still ignored")
     SC:ForceRestore()
