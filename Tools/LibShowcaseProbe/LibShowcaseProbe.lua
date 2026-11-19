@@ -109,8 +109,9 @@ local function MarkBlocked() blockedAtStart = #blockedSeen; return blockedAtStar
 -- cleared. "Pitch" is the camera's up/down angle. On 70959 (2026-11-19) one
 -- Write that cleared centring AND set dynamic pitch 1 raised the view once,
 -- at the write (the character lower on screen, more above it in view);
--- nothing followed the movement. Which write did it is what the procedure
--- separates. `arg` "centring" clears centring only, "1" also sets dynamic
+-- nothing followed the movement. The procedure separated the writes (run
+-- #405): dynamic pitch 1 does it, and follows the zoom; centring alone
+-- moved nothing (docs/DESIGN.md, Options). `arg` "centring" clears centring only, "1" also sets dynamic
 -- pitch 1, "off" puts everything back.
 local PITCH_QUESTION = "Did the view change when you pressed Write (the camera angle going up or down,"
     .. " the character moving on screen)? Note how, in the Note box."
