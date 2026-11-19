@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 4
+local MAJOR, MINOR = "LibShowcase-1.0", 8
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -111,6 +111,23 @@ lib.SHOULDER_FACTORS = fill(lib.SHOULDER_FACTORS or {}, {
     [8]  = { 0.2787,  0.04   },  -- Troll
     [10] = { 0.361,  -0.1654 },  -- Blood Elf
     [11] = { 0.248,  -0.02   },  -- Draenei
+})
+-- The same table's FEMALE column (#38): SHOULDER_FACTORS above is its male
+-- column, and the female framing differs (a female Human sits about 0.16
+-- further at a 2.1 zoom). Used when the sex is 3 (UnitSex); a race missing
+-- here takes its male pair. Mounted: one pair for both.
+lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {
+    [0]  = { 0.361,  -0.1654 },  -- default
+    [1]  = { 0.38,    0.0311 },  -- Human
+    [2]  = { 0.3045, -0.0483 },  -- Orc
+    [3]  = { 0.3533, -0.02   },  -- Dwarf
+    [4]  = { 0.329,   0.025  },  -- Night Elf
+    [5]  = { 0.3447,  0.03   },  -- Undead
+    [6]  = { 0.2427, -0.1867 },  -- Tauren
+    [7]  = { 0.329,  -0.012  },  -- Gnome
+    [8]  = { 0.355,  -0.1317 },  -- Troll
+    [10] = { 0.3177,  0.0683 },  -- Blood Elf
+    [11] = { 0.3177,  0      },  -- Draenei
 })
 lib.MOUNTED_SHOULDER_FACTORS = fill(lib.MOUNTED_SHOULDER_FACTORS or {}, { 1.2495, -4.0 })
 -- UnitRace's second return (the race file) to the IDs above.
@@ -247,6 +264,13 @@ end
 --------------------------------------------------------------------------------
 
 local function InCombat()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
+end
+
+-- The lockdown itself: what blocks SetUIVisibility from addon code (MEASURED
+-- 70959, docs/DESIGN.md "Combat"). Kept apart from InCombat, which may come
+-- to mean "combat has started" (#21) while SetUIVisibility still works.
+local function Locked()
     return type(InCombatLockdown) == "function" and InCombatLockdown() and true or false
 end
 
@@ -499,10 +523,20 @@ end
 
 -- The core restore: no lease check, no release. Clears the flag BEFORE the
 -- engine call, so the SetUIVisibility hook sees a restore already under way.
-function I.ShowUI()
+-- `shown`: the UI is already back (the player's own Alt+Z or Escape, which
+-- the lockdown doesn't block): only the record and the lifts follow it.
+-- In a lockdown SetUIVisibility from addon code is BLOCKED (MEASURED 70959):
+-- the call is not made, the UI stays marked hidden (so the lease is held)
+-- and the lifts stay up (a window put back under the hidden UI would vanish),
+-- and PLAYER_REGEN_ENABLED shows it (#42). Returns true when the UI is back.
+function I.ShowUI(shown)
     if not st.uiHidden then return false end
-    st.uiHidden = false
-    if type(SetUIVisibility) == "function" then pcall(SetUIVisibility, true) end
+    if not shown and Locked() then
+        st.showOwed = true
+        return false
+    end
+    st.uiHidden, st.showOwed = false, nil
+    if not shown and type(SetUIVisibility) == "function" then pcall(SetUIVisibility, true) end
     I.DropAll()
     return true
 end
@@ -657,6 +691,13 @@ function I.RevealForDialog(reason)
     local inst = st.owner
     if not inst or not st.uiHidden then return false end
     I.ShowUI()
+    if st.uiHidden then
+        -- In a lockdown: the UI comes back at PLAYER_REGEN_ENABLED, and the
+        -- owner is told then, not now (#42).
+        st.revealOwed = reason
+        I.Debug(inst, "game UI owed after combat: " .. tostring(reason))
+        return true
+    end
     I.Debug(inst, "game UI shown: " .. tostring(reason))
     I.NotifyShown(inst, reason)
     I.MaybeRelease()
@@ -673,14 +714,34 @@ end
 
 -- Prompts Blizzard shows WITHOUT StaticPopup_Show, each its own frame under
 -- UIParent: a ready check, a dungeon-finder proposal or role check, a role
--- poll, a PvP role popup, a loot roll. Their start events (all in the 70205
--- dump) bring the UI back the same way; listening to an event touches
--- nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
+-- poll, a PvP role popup, a loot roll; and the timers drawn under UIParent:
+-- a group's pull countdown and a battleground or arena start timer (#40,
+-- in the 70959 dump, times in seconds). Their start events (the others in
+-- the 70205 dump) bring the UI back the same way; listening to an event
+-- touches nothing. A prompt stays OPEN (st.prompts: key -> GetTime() it expires)
 -- until its end event, or its own time limit, or PROMPT_TIMEOUT: while one is
 -- open the UI is not hidden (HideUI), as for a StaticPopup already up. The
--- role poll has no end event; its timeout ends it.
+-- role poll has no end event; its timeout ends it. A timer (the third
+-- return: true) is held for its whole reported time, up to TIMER_LIMIT, the
+-- client's longest countdown (PartyCountdownConstants.MaxCountdownSeconds,
+-- 70959): a 120 s countdown must not be hidden after 60 s.
 local PROMPT_TIMEOUT = 60
-local PROMPT_START = {   -- event -> function(...) returning key, seconds?
+local TIMER_LIMIT = 3600
+
+-- A payload value addon code may read, or nil. The 70959 dump marks
+-- START_PLAYER_COUNTDOWN secret in a chat-messaging lockdown, and converting
+-- or comparing a secret value errors in addon code; canaccessvalue is in the
+-- 70959 dump (FrameScript). A client without it has no secret values.
+-- Whether the event even arrives in that lockdown is not measured.
+local function Plain(v)
+    local can = rawget(_G, "canaccessvalue")
+    if type(can) ~= "function" then return v end
+    local ok, yes = pcall(can, v)
+    if ok and yes then return v end
+    return nil   -- one value, not none: tonumber() and tostring() need an argument
+end
+
+local PROMPT_START = {   -- event -> function(...) returning key, seconds?, timer?
     READY_CHECK         = function(_, timeLeft) return "ready", tonumber(timeLeft) end,
     LFG_PROPOSAL_SHOW   = function() return "lfg" end,
     LFG_ROLE_CHECK_SHOW = function() return "rolecheck" end,
@@ -688,6 +749,12 @@ local PROMPT_START = {   -- event -> function(...) returning key, seconds?
     PVP_ROLE_POPUP_SHOW = function() return "pvprole" end,
     START_LOOT_ROLL     = function(rollID, rollTime)
         return "roll:" .. tostring(rollID), (tonumber(rollTime) or 0) / 1000   -- milliseconds
+    end,
+    START_PLAYER_COUNTDOWN = function(_, timeRemaining)
+        return "countdown", tonumber(Plain(timeRemaining)), true
+    end,
+    START_TIMER         = function(timerType, timeRemaining)
+        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true
     end,
 }
 local PROMPT_END = {     -- event -> function(...) returning the key, or a key prefix ending in "*"
@@ -700,6 +767,8 @@ local PROMPT_END = {     -- event -> function(...) returning the key, or a key p
     PVP_ROLE_POPUP_HIDE    = function() return "pvprole" end,
     CANCEL_LOOT_ROLL       = function(rollID) return "roll:" .. tostring(rollID) end,
     CANCEL_ALL_LOOT_ROLLS  = function() return "roll:*" end,
+    CANCEL_PLAYER_COUNTDOWN = function() return "countdown" end,
+    STOP_TIMER_OF_TYPE     = function(timerType) return "timer:" .. tostring(Plain(timerType)) end,
 }
 local PROMPT_EVENTS = {}
 for ev in pairs(PROMPT_START) do PROMPT_EVENTS[#PROMPT_EVENTS + 1] = ev end
@@ -716,9 +785,10 @@ end
 function I.OnPromptEvent(event, ...)
     local start, stop = PROMPT_START[event], PROMPT_END[event]
     if start then
-        local key, seconds = start(...)
+        local key, seconds, timer = start(...)
+        local limit = timer and TIMER_LIMIT or PROMPT_TIMEOUT
         if not seconds or seconds <= 0 then seconds = PROMPT_TIMEOUT end
-        st.prompts[key] = Now() + math.min(seconds, PROMPT_TIMEOUT) + 1
+        st.prompts[key] = Now() + math.min(seconds, limit) + 1
         I.RevealForDialog("dialog")
         return true
     elseif stop then
@@ -929,14 +999,17 @@ function I.TargetZoom(cfg)
 end
 
 -- The shoulder offset for a race (UnitRace's race file or race ID) at a zoom.
-function I.ShoulderOffsetFor(race, zoom, mounted)
+-- `sex` (optional, UnitSex's: 3 female) picks the female pair (#38);
+-- anything else, or none, the male one, as before.
+function I.ShoulderOffsetFor(race, zoom, mounted, sex)
     zoom = tonumber(zoom) or 0
     if mounted then
         local m = lib.MOUNTED_SHOULDER_FACTORS
         return zoom * m[1] + m[2]
     end
     local id = tonumber(race) or (race ~= nil and lib.RACE_IDS[race]) or 0
-    local f = lib.SHOULDER_FACTORS[id] or lib.SHOULDER_FACTORS[0]
+    if not lib.SHOULDER_FACTORS[id] then id = 0 end
+    local f = (tonumber(sex) == 3 and lib.FEMALE_SHOULDER_FACTORS[id]) or lib.SHOULDER_FACTORS[id]
     return zoom * f[1] + f[2]
 end
 lib.ShoulderOffsetFor = lib.ShoulderOffsetFor
@@ -946,12 +1019,13 @@ function I.PlayerShoulderOffset(cfg, zoom)
     if I.IsMounted(cfg) then
         return cfg.mountedShoulder or I.ShoulderOffsetFor(nil, cfg.mountedZoom, true)
     end
-    local race
+    local race, sex
     if type(UnitRace) == "function" then
         local _, raceFile, raceID = UnitRace("player")
         race = tonumber(raceID) or raceFile
     end
-    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom) * cfg.shoulderMult
+    if type(UnitSex) == "function" then sex = UnitSex("player") end
+    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult
 end
 
 -- Write the presentation's CVars (Enter, and again after a cast reset).
@@ -1060,13 +1134,14 @@ function I.Enter(inst, anchor)
     end
 
     do
-        local yawMoveSpeed = tonumber(type(GetCVar) == "function" and GetCVar("cameraYawMoveSpeed")) or 180
-        if yawMoveSpeed <= 0 then yawMoveSpeed = 180 end
+        local yawMoveSpeed = I.YawMoveSpeed()
         local dir = cfg.yawOffset < 0 and -1 or 1
         local degrees = math.abs(cfg.yawDegrees)
         local seconds = math.max(0.05, cfg.enterDuration)
         local speed = Clamp((degrees / yawMoveSpeed) / seconds, 0.10, 4.0, 1.0)
-        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, cfg.orbitSpeed
+        -- The entry eases toward the orbit speed of this moment; the orbit
+        -- itself reads the setting again when it starts (I.OrbitSpeed).
+        cam.yawDir, cam.yawFromSpeed, cam.yawToSpeed = dir, speed, I.OrbitSpeed(cfg)
         I.StopYaw()
         I.ApplyYaw(dir * speed)
         I.Debug(inst, string.format("enter yaw: target=%d speed=%.3f yawMoveSpeed=%.1f",
@@ -1138,7 +1213,9 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
-    I.DropAll()
+    -- The lifts stay while the UI is still hidden (a show owed after the
+    -- lockdown, #42): PLAYER_REGEN_ENABLED drops them with it.
+    if not st.uiHidden then I.DropAll() end
     I.MaybeRelease()
     if wasActive then I.Debug(inst, "restored: " .. tostring(reason or "force")) end
 end
@@ -1161,6 +1238,23 @@ function I.MaybeSalute(cam)
     if type(DoEmote) == "function" then pcall(DoEmote, "SALUTE") end
 end
 
+-- The player's camera turn speed (cameraYawMoveSpeed; 180 when unset or
+-- not a positive number).
+function I.YawMoveSpeed()
+    local v = tonumber(type(GetCVar) == "function" and GetCVar("cameraYawMoveSpeed")) or 180
+    if v <= 0 then v = 180 end
+    return v
+end
+
+-- The orbit's MoveView*Start speed. That speed is a multiple of
+-- cameraYawMoveSpeed, so the orbit is scaled like the turn: orbitSpeed is the
+-- speed at the default 180, whatever the player's setting (#39). Read each
+-- time the orbit starts or resumes, since the player may change the setting
+-- mid-presentation (Codex, #48).
+function I.OrbitSpeed(cfg)
+    return cfg.orbitSpeed * (180 / I.YawMoveSpeed())
+end
+
 -- The settled presentation: a slow orbit, or still. With castAware, the
 -- settled view is saved first so a cast can return to it.
 function I.Settle(cam)
@@ -1168,7 +1262,7 @@ function I.Settle(cam)
     if cam.cfg.castAware and cam.cfg.presentationViewSlot then
         cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false
     end
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.cfg.orbitSpeed) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
 end
 
 function I.OnUpdate(elapsed)
@@ -1255,7 +1349,7 @@ function I.ResumeOrbitAfterCast()
     end
     if cam.mode ~= "castHold" then return end
     I.StopYaw()
-    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * cam.cfg.orbitSpeed) end
+    if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
     cam.mode, cam.elapsed, cam.castResetDuration, cam.resumeAfterReset = nil, 0, nil, nil
     lib.animFrame:Hide()
 end
@@ -1312,8 +1406,14 @@ function I.OnEvent(event, ...)
         return
     end
     if event == "PLAYER_REGEN_ENABLED" then
-        -- Deferred drops of protected frames; a hide that outlived combat.
-        if st.uiHidden then I.ShowUI() end
+        -- Deferred drops of protected frames; a hide that outlived combat,
+        -- or a show the lockdown blocked (#42), with the owner told now.
+        local owner, reason = st.owner, st.revealOwed
+        st.revealOwed = nil
+        if st.uiHidden and I.ShowUI() and reason and owner then
+            I.Debug(owner, "game UI shown: " .. tostring(reason))
+            I.NotifyShown(owner, reason)
+        end
         I.DropDeferred()
         I.MaybeRelease()
         return
@@ -1350,10 +1450,14 @@ end
 -- clears uiHidden first, so it never lands here.
 function I.OnSetUIVisibility(visible)
     if not visible or not st.uiHidden or not st.owner then return end
+    -- A call the lockdown blocked (an addon's) changes nothing: only a UI
+    -- actually back is the player's Escape or Alt+Z.
+    if UIParent and UIParent.IsShown and not UIParent:IsShown() then return end
     local inst = st.owner
+    st.showOwed, st.revealOwed = nil, nil
     I.Notify(inst, "ui-shown")
     if st.owner ~= inst then return end
-    if st.uiHidden then I.ShowUI() end
+    if st.uiHidden then I.ShowUI(true) end
     if st.cam.active and st.cam.mode ~= "exit" then I.Exit(inst, "ui-shown") end
     I.MaybeRelease()
 end

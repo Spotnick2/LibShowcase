@@ -57,6 +57,8 @@ end
 -- State
 --------------------------------------------------------------------------------
 
+local playerCall = false   -- WoW.playerSetUIVisibility's call under way
+
 local function log(...)
     local parts = {}
     for i = 2, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
@@ -79,6 +81,7 @@ table.insert(WoW.onReset, function()
     WoW.loggedIn = false
     WoW.mounted = false
     WoW.race = { "Human", "Human", 1 }
+    WoW.sex = 2
     WoW.cvars = {}
     for k, v in pairs(WoW.DEFAULT_CVARS) do WoW.cvars[k] = v end
     WoW.camera = { zoom = 4, view = 1, savedViews = {}, yaw = nil, pitchlimit = 88 }
@@ -100,8 +103,16 @@ table.insert(WoW.onReset, function()
 
     -- A fresh engine function each reset, so hooks from an earlier load don't
     -- stack up across test sections.
+    -- From addon code it is BLOCKED in a lockdown (MEASURED 70959,
+    -- docs/DESIGN.md "Combat"): the call is logged, recorded in WoW.blocked
+    -- and changes nothing; a post-hook still runs, as on the client. The
+    -- player's own Alt+Z or Escape is secure: WoW.playerSetUIVisibility.
     SetUIVisibility = function(v)
         log("SetUIVisibility", v)
+        if WoW.combat and not playerCall then
+            table.insert(WoW.blocked, "SetUIVisibility")
+            return
+        end
         UIParent._shown = v and true or false
         quiet(UIParent)
     end
@@ -141,6 +152,15 @@ table.insert(WoW.onReset, function()
         return nil
     end
 end)
+
+-- The player's own Alt+Z or Escape: the engine's secure call, which the
+-- lockdown doesn't block. Through the global, so hooks on it run.
+function WoW.playerSetUIVisibility(v)
+    playerCall = true
+    local ok, err = pcall(SetUIVisibility, v)
+    playerCall = false
+    if not ok then error(err, 2) end
+end
 
 -- Close a dialog as Blizzard does (accept, cancel, Escape).
 function WoW.closeDialog(d)
@@ -190,6 +210,7 @@ function GetLootRollTimeLeft(id) return WoW.lootRolls[id] or 0 end
 function IsLoggedIn() return WoW.loggedIn end
 function IsMounted() return WoW.mounted end
 function UnitRace(unit) return WoW.race[1], WoW.race[2], WoW.race[3] end
+function UnitSex(unit) return WoW.sex end   -- 2 male, 3 female (the dump: optional sex:number)
 
 function GetCVar(name) return WoW.cvars[name] end
 function SetCVar(name, value)

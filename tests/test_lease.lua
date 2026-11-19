@@ -156,7 +156,7 @@ do
     eq(secure:GetParent(), nil, "the protected window is lifted (out of combat)")
 
     WoW.combat = true                      -- e.g. Escape pressed mid-fight
-    SetUIVisibility(true)
+    WoW.playerSetUIVisibility(true)        -- the player's own: not blocked
     eq(reasons[1], "ui-shown", "the owner is told")
     check(UIParent:IsShown(), "the UI is back")
     eq(WoW.cvars.CameraKeepCharacterCentered, "0", "(exit animation pending)")
@@ -352,6 +352,9 @@ do
         { "ROLE_POLL_BEGIN", { "Leader" }, nil },
         { "PVP_ROLE_POPUP_SHOW", { {} }, "PVP_ROLE_POPUP_HIDE", {} },
         { "START_LOOT_ROLL", { 7, 60000 }, "CANCEL_LOOT_ROLL", { 7 } },
+        -- #40: a pull countdown and a battleground / arena start timer.
+        { "START_PLAYER_COUNTDOWN", { "Player-1-00000001", 10, 10, true, "Leader" }, "CANCEL_PLAYER_COUNTDOWN", { "Player-1-00000001", true } },
+        { "START_TIMER", { 1, 120, 120 }, "STOP_TIMER_OF_TYPE", { 1 } },
     }
     for i, p in ipairs(prompts) do
         local ev = p[1]
@@ -378,6 +381,46 @@ do
         SC:ForceRestore()
     end
     eq(#forced, 0, "none is read as Escape/Alt+Z")
+
+    -- A countdown that runs out (no cancel) is closed by its own time.
+    SC:Enter(newWindow())
+    WoW.fire("START_PLAYER_COUNTDOWN", "Player-1-00000001", 10, 10, true, "Leader")
+    eq(select(2, SC:HideGameUI()), "dialog", "a running countdown keeps the UI up")
+    WoW.advance(12)
+    check(SC:HideGameUI(), "  and once its 10 s are over, the UI hides again")
+    SC:ForceRestore()
+
+    -- A timer longer than the 60 s prompt timeout is held for its whole time
+    -- (Codex, #47): /countdown 120, the hide retried after 61 s.
+    for _, t in ipairs({
+        { "START_PLAYER_COUNTDOWN", { "Player-1-00000001", 120, 120, true, "Leader" }, "a 120 s countdown" },
+        { "START_TIMER", { 1, 120, 120 }, "a 120 s start timer" },
+    }) do
+        SC:Enter(newWindow())
+        WoW.fire(t[1], unpack(t[2]))
+        WoW.advance(61)
+        eq(select(2, SC:HideGameUI()), "dialog", t[3] .. ": still up after 61 s")
+        WoW.advance(60)
+        check(SC:HideGameUI(), "  and once its 120 s are over, the UI hides again")
+        SC:ForceRestore()
+    end
+
+    -- A secret duration (the 70959 dump: START_PLAYER_COUNTDOWN is secret in
+    -- a chat-messaging lockdown) is never converted: the UI still comes back,
+    -- held for the 60 s fallback.
+    local SECRET = 999
+    local asked = 0
+    rawset(_G, "canaccessvalue", function(v) asked = asked + 1; return v ~= SECRET end)
+    SC:Enter(newWindow())
+    local okFire, err = pcall(WoW.fire, "START_PLAYER_COUNTDOWN", "Player-1-00000001", SECRET, SECRET, true, "Leader")
+    check(okFire, "a secret countdown duration does not error: " .. tostring(err))
+    check(UIParent:IsShown() and asked > 0, "  the UI is brought back, the payload asked about first")
+    WoW.advance(59)
+    eq(select(2, SC:HideGameUI()), "dialog", "  held for the fallback")
+    WoW.advance(3)
+    check(SC:HideGameUI(), "  and 60 s later, not the secret's 999 s, the UI hides again")
+    SC:ForceRestore()
+    rawset(_G, "canaccessvalue", nil)
 
     -- Started before Enter: Enter presents with the UI up, until it ends.
     WoW.fire("READY_CHECK", "Leader", 35)
@@ -573,6 +616,70 @@ do
     check(D:Enter(newWindow()), "once it is free, D presents")
     eq(DB5.LibShowcaseCapture.CameraKeepCharacterCentered, "1", "  healed first, holding the lease")
     D:ForceRestore()
+end
+
+
+------------------------------------------------------------------------------
+-- #42: SetUIVisibility from addon code is BLOCKED in a lockdown (MEASURED
+-- 70959). The UI hidden going into a lockdown (the #21 path: a consumer's
+-- PLAYER_REGEN_DISABLED handler after the library's) must not be "shown" by
+-- a call that does nothing: the library keeps it marked hidden, the lease
+-- and the lifts, and shows it at PLAYER_REGEN_ENABLED.
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    local forced, shown = {}, {}
+    local SC = lib:New({ owner = "A", onForcedExit = function(r) forced[#forced + 1] = r end,
+                         onGameUIShown = function(r) shown[#shown + 1] = r end })
+    local win = newWindow()
+
+    -- A restore inside the lockdown, camera OFF.
+    check(SC:Acquire() and SC:HideGameUI(win), "the UI hidden")
+    WoW.combat = true                         -- the lockdown is on, the UI still hidden
+    SC:Release()
+    eq(#WoW.blocked, 0, "a restore in the lockdown makes no SetUIVisibility call (it would be blocked)")
+    check(not UIParent:IsShown() and SC:IsGameUIHidden(), "  the UI is still hidden, and the library knows it")
+    check(SC:IsOwner(), "  the lease is held while the show is owed")
+    eq(win:GetParent(), nil, "  the window stays lifted, so it doesn't vanish under the hidden UI")
+    WoW.leaveCombat()
+    check(UIParent:IsShown() and not SC:IsGameUIHidden(), "PLAYER_REGEN_ENABLED shows the UI")
+    eq(win:GetParent(), UIParent, "  and puts the window back")
+    check(not SC:IsOwner(), "  then gives the lease back")
+    eq(#forced + #shown, 0, "  nobody was told anything (the owner asked for the release)")
+
+    -- A dialog inside the lockdown while presenting: the reveal is owed, and
+    -- the owner is told when the UI really comes back.
+    check(SC:Enter(win), "presenting")
+    WoW.combat = true
+    StaticPopup_Show("PARTY_INVITE")
+    eq(#WoW.blocked, 0, "a dialog in the lockdown: no blocked SetUIVisibility")
+    check(not UIParent:IsShown(), "  the UI stays hidden (it can't be shown yet)")
+    eq(#shown, 0, "  and onGameUIShown waits")
+    WoW.leaveCombat()
+    check(UIParent:IsShown(), "PLAYER_REGEN_ENABLED shows it")
+    eq(shown[1], "dialog", "  then onGameUIShown(\"dialog\")")
+    eq(#shown, 1, "  once")
+    check(SC:IsActive() and SC:IsOwner(), "  the presentation and the lease kept, as for any dialog")
+    eq(#forced, 0, "  no forced exit")
+    for _, d in ipairs(WoW.dialogs) do WoW.closeDialog(d) end
+    SC:ForceRestore()
+
+    -- Another addon's SetUIVisibility(true) in the lockdown: blocked, the UI
+    -- doesn't move, so it is not the player's Escape.
+    check(SC:Enter(win), "presenting again")
+    WoW.combat = true
+    SetUIVisibility(true)                     -- an addon's call: blocked
+    eq(WoW.blocked[1], "SetUIVisibility", "an addon's SetUIVisibility in the lockdown is blocked")
+    check(not UIParent:IsShown() and SC:IsActive(), "  the UI stays hidden, the presentation goes on")
+    eq(#forced, 0, "  and it is not read as Escape")
+
+    -- The player's own Escape in the lockdown: secure, the UI really comes back.
+    WoW.playerSetUIVisibility(true)
+    check(UIParent:IsShown() and not SC:IsGameUIHidden(), "the player's Escape in the lockdown shows the UI")
+    eq(forced[1], "ui-shown", "  the owner is told")
+    eq(win:GetParent(), UIParent, "  the window is put back")
+    WoW.leaveCombat()
+    SC:ForceRestore()
 end
 
 done("test_lease")

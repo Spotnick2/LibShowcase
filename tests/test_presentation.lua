@@ -349,4 +349,77 @@ do
     check(not pcall(SC.Enter, nil), "a dot-called method errors")
 end
 
+
+------------------------------------------------------------------------------
+-- #39: the orbit follows the player's cameraYawMoveSpeed as the turn does.
+-- MoveView*Start's speed is a multiple of it, so orbitSpeed is scaled to
+-- mean the same speed whatever the setting (the default 180: unchanged).
+------------------------------------------------------------------------------
+for _, case in ipairs({ { "90", 180 / 90 }, { "180", 1 }, { "360", 180 / 360 }, { "0", 1 }, { "fast", 1 } }) do
+    local lib = freshLibrary()
+    WoW.cvars.cameraYawMoveSpeed = case[1]
+    local SC = lib:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter()
+    ticks(0.1, 16)
+    local want = -(0.005 * case[2])
+    eq(WoW.camera.yaw, want, "cameraYawMoveSpeed " .. case[1] .. ": the settled orbit at orbitSpeed scaled by " .. case[2])
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    eq(WoW.camera.yaw, want, "  and the orbit a cast's end resumes")
+    SC:ForceRestore()
+end
+
+-- The setting changed after Enter (Codex, #48): the orbit reads it again when
+-- it starts at the end of the entry, and when a cast's end resumes it.
+do
+    local lib = freshLibrary()
+    WoW.cvars.cameraYawMoveSpeed = "90"
+    local SC = lib:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter()
+    ticks(0.1, 3)
+    WoW.cvars.cameraYawMoveSpeed = "180"
+    ticks(0.1, 13)
+    eq(WoW.camera.yaw, -0.005, "changed to 180 during the entry: the orbit starts at 180's speed, not 90's")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    WoW.cvars.cameraYawMoveSpeed = "360"
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    eq(WoW.camera.yaw, -0.0025, "changed to 360 during a cast: its end resumes at 360's speed")
+    SC:ForceRestore()
+    WoW.cvars.cameraYawMoveSpeed = "180"
+end
+
+
+------------------------------------------------------------------------------
+-- #38: the female column. ShoulderOffsetFor(race, zoom, mounted, sex): sex 3
+-- takes lib.FEMALE_SHOULDER_FACTORS, anything else (or none) the male pair,
+-- as before; a race missing from the female table takes its male pair. The
+-- player's own offset asks UnitSex("player").
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    eq(lib.ShoulderOffsetFor("Human", 2.1, nil, 3), 2.1 * 0.38 + 0.0311, "female Human: the female pair")
+    eq(lib.ShoulderOffsetFor("Human", 2.1, nil, 2), 2.1 * 0.3283 - 0.02, "male Human: the male pair")
+    eq(lib.ShoulderOffsetFor("Human", 2.1), 2.1 * 0.3283 - 0.02, "  and without a sex, as before")
+    eq(lib.ShoulderOffsetFor(6, 4, nil, 3), 4 * 0.2427 - 0.1867, "female Tauren, by race ID")
+    eq(lib.ShoulderOffsetFor("HighOrderSkyborne", 2, nil, 3), 2 * 0.361 - 0.1654, "an unknown race, female: the default")
+    eq(lib.ShoulderOffsetFor(nil, 8, true, 3), 8 * 1.2495 - 4.0, "mounted: one pair for both")
+    eq(lib.ShoulderOffsetFor(99, 2, nil, 3), 2 * 0.361 - 0.1654, "an unknown race ID, female: the default")
+    eq(lib.ShoulderOffsetFor(99, 2), 2 * 0.361 - 0.1654, "  and male, as before")
+    lib.SHOULDER_FACTORS[50] = { 0.1, 0.2 }
+    eq(lib.ShoulderOffsetFor(50, 1, nil, 3), 0.1 + 0.2, "a race the female table lacks: its male pair")
+    lib.SHOULDER_FACTORS[50] = nil
+    eq(lib.FEMALE_SHOULDER_FACTORS[1][1], 0.38, "lib.FEMALE_SHOULDER_FACTORS is public")
+
+    for _, case in ipairs({ { 3, 0.38, 0.0311, "female" }, { 2, 0.3283, -0.02, "male" }, { nil, 0.3283, -0.02, "unknown sex" } }) do
+        WoW.sex = case[1]
+        local SC = lib:New({ owner = "Sex" .. case[4], shoulderRef = 2.1 })
+        SC:Enter()
+        local want = 2.1 * case[2] + case[3]
+        check(math.abs(tonumber(WoW.cvars.test_cameraOverShoulder) - want) < 1e-9,
+              "the player's own offset, " .. case[4] .. " Human: " .. want)
+        SC:ForceRestore()
+    end
+    WoW.sex = 2
+end
+
 done("test_presentation")

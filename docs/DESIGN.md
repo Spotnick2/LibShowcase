@@ -31,8 +31,8 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 | `SC:DropPopup(dialog)` | A no-op, kept for API stability. |
 
 Library functions (dot): `lib.SuppressExperimentalCVarPopup()` (returns a count),
-`lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?)`. Public tables, filled in place:
-`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
+`lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?, sex?)` (`sex` 3 is female, MINOR 8, #38). Public tables, filled in place:
+`lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS` (the male column), `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
 `lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`) and
 `lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4).
 
@@ -55,7 +55,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `forceMounted` | false | |
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
-| `orbit`, `orbitSpeed` | true, 0.005 | |
+| `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed |
 | `savedViewSlot` | 5 | 2-5, the player's own view |
 | `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot` |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
@@ -84,7 +84,7 @@ owner.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)
-  restores the UI and the camera at once; a **protected** lifted frame keeps its record (parent,
+  restores the camera at once; a **protected** lifted frame keeps its record (parent,
   scale, strata, level; points recorded but not re-applied, so a drag made while lifted survives)
   and is put back at `PLAYER_REGEN_ENABLED`, the record cleared only after the reparent succeeded.
   The library never hides a protected frame; `onForcedExit` lets the consumer close its window.
@@ -92,8 +92,15 @@ owner.
   MEASURED 70959 (`/fp steps ls combat`, 2026-11-19): once `InCombatLockdown()` is true,
   `SetUIVisibility(false)` and `(true)` from addon code are **blocked** (`ADDON_ACTION_BLOCKED`, the
   `pcall` returns true, `UIParent` doesn't change). The player's own Alt+Z or Escape still works.
-  So the library can't hide or show the UI inside a lockdown: the "Escape mid-fight" restore
-  above relies on the player's own call having shown it (#42).
+  So the library never calls it there (MINOR 5, #42): `HideUI` refuses in combat, and a show due
+  inside a lockdown (a restore, a release, a dialog's reveal) is **owed**: the UI stays marked
+  hidden, the lease is held and the lifts stay up (a window put back under the still-hidden UI
+  would vanish), and `PLAYER_REGEN_ENABLED` shows the UI, drops the lifts and gives the lease back.
+  A reveal owed that way calls `onGameUIShown(reason)` then, when the UI is really back, not
+  before. The player's own Escape or Alt+Z in a lockdown does show the UI: the hook then only
+  follows it (no second call), and a `SetUIVisibility(true)` hook run that changed nothing (a
+  blocked call, `UIParent` still hidden) is not read as Escape. Getting the UI hidden into a
+  lockdown at all is #21.
 - **A drop is re-entrant.** Putting a frame back under a hidden `UIParent` fires its `OnHide`
   during the `SetParent` call, which may drop it again, so a record leaves the list before
   anything moves. Reparenting also sets the frame level (the new parent's + 1, 0 with no
@@ -122,10 +129,20 @@ owner.
   **Prompts that are not StaticPopups** (each its own frame under UIParent) do the same through
   their events, which the library listens to (touching nothing): `READY_CHECK`,
   `LFG_PROPOSAL_SHOW`, `LFG_ROLE_CHECK_SHOW`, `ROLE_POLL_BEGIN`, `PVP_ROLE_POPUP_SHOW`,
-  `START_LOOT_ROLL` (all in the 70205 dump). Each stays **open** until its end event
+  `START_LOOT_ROLL` (all in the 70205 dump), and since MINOR 6 (#40) the timers drawn under
+  UIParent: `START_PLAYER_COUNTDOWN` (a group's pull countdown) and `START_TIMER` (a battleground
+  or arena start timer), both in the 70959 dump with their time in seconds. They reveal as
+  `"dialog"` too, like every prompt. Each stays **open** until its end event
   (`READY_CHECK_FINISHED`, `LFG_PROPOSAL_DONE`/`_FAILED`/`_SUCCEEDED`, `LFG_ROLE_CHECK_HIDE`/
-  `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`), its
-  own time limit (the ready check's, the roll's), or 60 s (the role poll has no end event). A roll
+  `_DECLINED`, `PVP_ROLE_POPUP_HIDE`, `CANCEL_LOOT_ROLL` by rollID, `CANCEL_ALL_LOOT_ROLLS`,
+  `CANCEL_PLAYER_COUNTDOWN`, `STOP_TIMER_OF_TYPE` by timer type), its own time limit (the ready
+  check's, the roll's, the countdown's, the timer's), or 60 s (the role poll has no end event). A
+  prompt's own limit is capped at 60 s, but a countdown or start timer is held for its whole reported
+  time, up to 3600 s (`PartyCountdownConstants.MaxCountdownSeconds`, 70959): a `/countdown 120` keeps
+  the UI up for 120 s. The 70959 dump marks `START_PLAYER_COUNTDOWN` secret in a chat-messaging
+  lockdown; a payload `canaccessvalue` refuses is never converted (that would error in addon
+  code): the UI still comes back, held for the 60 s fallback. Whether the event arrives in that
+  lockdown is not measured. A roll
   the player answers ends no earlier than its time limit, so the UI may stay up a little longer.
   **A StaticPopup already up, or a prompt still open,** when the UI would be hidden keeps it up:
   its Show already happened, so nothing would bring it back (`HideGameUI` returns
@@ -274,6 +291,11 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
 ## Deliberate differences from AltStable's block
 
 - One owner, enforced (AltStable had a single caller).
+- A female character's shoulder offset uses the female pair (`lib.FEMALE_SHOULDER_FACTORS`, #38);
+  AltStable used the male column for everyone. `tests/test_parity.lua` runs a male character.
+- The orbit is scaled by the player's `cameraYawMoveSpeed` (#39); AltStable scaled only the entry
+  turn, so its orbit sped up or slowed down with the setting. The same at the default 180, where
+  `tests/test_parity.lua` runs.
 - Every restore drops **every** lifted frame (AltStable put back the sheet and GameTooltip; its
   menu put itself back).
 - Blizzard dialogs are never touched: AltStable lifted and raised its StaticPopups over the hidden
