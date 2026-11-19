@@ -89,6 +89,11 @@ owner.
   and is put back at `PLAYER_REGEN_ENABLED`, the record cleared only after the reparent succeeded.
   The library never hides a protected frame; `onForcedExit` lets the consumer close its window.
   Enter refuses in combat, and so does lifting a protected frame.
+  MEASURED 70959 (`/fp steps ls combat`, 2026-11-19): once `InCombatLockdown()` is true,
+  `SetUIVisibility(false)` and `(true)` from addon code are **blocked** (`ADDON_ACTION_BLOCKED`, the
+  `pcall` returns true, `UIParent` doesn't change). The player's own Alt+Z or Escape still works.
+  So the library can't hide or show the UI inside a lockdown: the "Escape mid-fight" restore
+  above relies on the player's own call having shown it (#42).
 - **A drop is re-entrant.** Putting a frame back under a hidden `UIParent` fires its `OnHide`
   during the `SetParent` call, which may drop it again, so a record leaves the list before
   anything moves. Reparenting also sets the frame level (the new parent's + 1, 0 with no
@@ -130,8 +135,14 @@ owner.
   is asked too, read-only: `GetReadyCheckStatus("player") == "waiting"` with
   `GetReadyCheckTimeLeft() > 0`, `GetLFGProposal()`, `GetLFGRoleUpdate()`, and
   `GetLootRollTimeLeft(id) > 0` for each of `GetActiveLootRollIDs()`. These are in the 70205 dump by
-  name only; the Retail shapes are assumed (unmeasured, see Open measurements), each call is
-  `pcall`ed, and an unexpected answer counts as "not open". The role poll and the PvP role popup
+  name only; each call is `pcall`ed, and an unexpected answer counts as "not open". MEASURED 70959
+  (`/fp steps ls prompts`, 2026-11-19): `GetReadyCheckStatus("player")` is `"waiting"` until the
+  player answers (`"ready"` for the one who started it), then nil; `GetReadyCheckTimeLeft()` counts
+  down in seconds, then 0; with nothing pending `GetLFGProposal()` returns nothing,
+  `GetLFGRoleUpdate()` returns `false, 0, 0, nil, nil, false`, and `GetActiveLootRollIDs()` a table:
+  Retail's shapes so far. Not yet seen, and they're what this check reads: a populated
+  `GetActiveLootRollIDs()` with `GetLootRollTimeLeft(id)`, and `GetLFGProposal()` /
+  `GetLFGRoleUpdate()` with a proposal or role check pending (Open measurements). The role poll and the PvP role popup
   have no getter.
   MEASURED 70205: a real ready check while presenting brought the UI back
   (`onGameUIShown("dialog")`, presentation active, lease held) with no `StaticPopup_Show`:
@@ -284,9 +295,12 @@ were then: `/lsprobe <command>` is now `/fp ls <command>`.
 
 | Question | Procedure |
 |---|---|
-| Is Narcissus's `CameraZoomIn(0)` nudge needed for the offset to apply at once? | `/fp steps ls nudge` (without, then with) |
-| `SetUIVisibility` inside a real lockdown (waits for `InCombatLockdown()` to turn true) | `/fp steps ls combat` |
-| The prompt getters' shapes (`GetReadyCheckStatus`, `GetReadyCheckTimeLeft`, `GetLFGProposal`, `GetLFGRoleUpdate`, `GetActiveLootRollIDs`, `GetLootRollTimeLeft`): Retail's? | `/fp steps ls prompts` (a ready check or a loot roll waiting, then answered) |
+| The prompt getters with a prompt pending, as the live-prompt check reads them: a populated `GetActiveLootRollIDs()` and `GetLootRollTimeLeft(id)` (a loot roll up), `GetLFGProposal()` (a dungeon finder proposal up), `GetLFGRoleUpdate()` (a role check up) | `/fp steps ls prompts` with that prompt up instead of a ready check |
+
+Closed on 70959 (2026-11-19, issue #3): dynamic pitch (the `dynamicPitch` option row), the
+ready-check getters and the idle prompt getters, `SetUIVisibility` in a lockdown (above), and the
+`CameraZoomIn(0)` nudge: `/fp steps ls nudge` saw the shoulder offset apply at once with and
+without it, so the library doesn't need it (and never did it).
 
 Every `StaticPopup_Show` is logged by the probe with whether the dialog's `which` was written
 securely (`issecurevariable`), every blocked action is copied into its log, and `/fp ls focus`
