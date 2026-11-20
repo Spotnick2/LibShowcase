@@ -1549,12 +1549,15 @@ Probe:Steps("orbitspeed", {
 })
 
 -- 17. #59: a race the shoulder tables lack. Skyborne (95 and 96, Forever's
--- own) is built on the Blood Elf rig (ChrModel 218/219: the Blood Elf
--- skeletons and camera offsets, CustomizeScale 1.0 instead of 1.1/1.2,
--- forever-chrmodel-1.60.1.70959.csv), but races on one rig don't share a
--- pair in the reference table (Void Elf differs from Blood Elf). So the
--- candidates are shown one by one on the settled presentation, at its own
--- zoom, a screenshot each, and the tester picks.
+-- own) is built on the Blood Elf rig (ChrModel 218/219 share the Blood Elf
+-- skeletons and camera distance; the scale and the customization camera's z
+-- offsets differ: forever-chrmodel-1.60.1.70959.csv), but races on one rig
+-- don't share a pair in the reference table (Void Elf differs from Blood
+-- Elf). So the candidates are shown one by one on the settled presentation,
+-- at its own zoom, a screenshot each, and the tester picks. Unmounted and on
+-- mouse and keyboard only: mounted the library uses its mounted formula and
+-- zoom, and in gamepad mode centring stays on (#54), which can mask the
+-- differences (Codex, PR #61).
 local FRAMING_CANDIDATES = {
     [3] = { { "A", "today's (the default pair)", 0.361, -0.1654 }, { "B", "Blood Elf", 0.3177, 0.0683 },
             { "C", "Void Elf", 0.3353, -0.02 }, { "D", "Night Elf", 0.329, 0.025 } },
@@ -1563,9 +1566,22 @@ local FRAMING_CANDIDATES = {
 }
 local framing = {}
 
-local function FramingSettled()
+local function FramingCam()
     local cam = type(lib().state) == "table" and lib().state.cam
-    if SC:IsActive() and type(cam) == "table" and cam.mode == nil then
+    return type(cam) == "table" and cam or nil
+end
+
+local function FramingOpen()
+    if G("IsMounted") and IsMounted() then error("mounted: dismount (the mounted framing has its own formula), then Retry", 0) end
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    framing = {}   -- a measurement from an earlier run never carries over
+    return OpenOrThrow()
+end
+
+local function FramingSettled()
+    local cam = FramingCam()
+    if SC:IsActive() and cam and cam.mode == nil then
+        framing.run = RunOf("framing")
         framing.zoom = tonumber(cam.cfg and cam.cfg.shoulderRef) or tonumber(cam.enterToZoom) or tonumber(GetCameraZoom())
         local _, raceFile, raceID = UnitRace("player")
         framing.sex = G("UnitSex") and UnitSex("player") == 3 and 3 or 2
@@ -1578,8 +1594,15 @@ local function FramingSettled()
 end
 
 local function FramingTry(i)
+    -- This run's settled measurement, and the camera still settled now: a
+    -- Done pressed on the wait mid-entry gets a refusal, not a mid-turn shot
+    -- (Codex, PR #61).
+    local cam = FramingCam()
+    if not (SC:IsActive() and framing.zoom and ThisRun(framing.run, "framing")) then
+        error("the presentation hasn't settled in this run: Back to Open", 0)
+    end
+    if not (cam and cam.mode == nil) then error("the camera is still moving: wait a moment, then Retry", 0) end
     local c = FRAMING_CANDIDATES[framing.sex or 2][i]
-    if not (SC:IsActive() and framing.zoom) then error("the presentation isn't open: Back to Open", 0) end
     local offset = framing.zoom * c[3] + c[4]
     lib().SuppressExperimentalCVarPopup()
     pcall(SetCVar, "test_cameraOverShoulder", offset)
@@ -1597,8 +1620,8 @@ end
 
 Probe:Steps("framing", {
     title = "The shoulder pair for a race the tables lack (#59)",
-    { text = "On the character to frame, out of combat, somewhere open. You'll see four candidates, A to D, and pick the one that puts the character furthest to one side while fully in view: watch for that on each. Open starts a presentation.",
-      button = "Open", run = OpenOrThrow },
+    { text = "On the character to frame, unmounted, on mouse and keyboard, out of combat, somewhere open. You'll see four candidates, A to D, and pick the one that puts the character furthest to one side while fully in view: watch for that on each. Open starts a presentation.",
+      button = "Open", run = FramingOpen },
     { text = "Waiting for the camera to settle.", timeout = 15, wait = FramingSettled },
     FramingStep(1), FramingStep(2), FramingStep(3), FramingStep(4),
     { text = "Which candidate framed the character best: to one side and fully in view? Write its letter (A, B, C or D) in the Note box, then answer: was one clearly the best?",

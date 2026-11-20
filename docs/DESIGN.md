@@ -317,8 +317,11 @@ An r3 instance upgraded in place gets `hideWorldNames = false` (`tests/test_name
   AltStable used the male column for everyone. `tests/test_parity.lua` runs a male character.
   Seen in game (70959, release check run #427): a female Night Elf framed to one side, in view.
   Forever's own Skyborne (95 High Order, 96 Windshaper; race file `Skyborne`) takes the Blood
-  Elf pairs since MINOR 11 (#59): its models (ChrModel 218/219) use the Blood Elf skeletons and
-  camera data, only `CustomizeScale` differs (1.0 against 1.1/1.2; forever-chrmodel-1.60.1.70959).
+  Elf pairs since MINOR 11 (#59): its models (ChrModel 218/219, forever-chrmodel-1.60.1.70959)
+  share the Blood Elf ones' (19/20) skeletons, `CameraDistanceOffset`, `CustomizeFacing` and
+  barbershop camera values (`BarberShopCameraOffsetScale`, `…RotationFacing`, `…RotationOffset`).
+  They differ in `CustomizeScale` (1.0 against 1.1/1.2) and the customization camera's z offsets
+  (`FaceCustomizationOffset_2` 0 against -0.25/-0.38, `CustomizeOffset_2` 0.08 against 0).
   Measured (`/fp steps ls framing`, run #511, a female at zoom 2.2): today's default, the Blood
   Elf, Void Elf and Night Elf pairs put her centre between 34% and 38% of the width, and no
   candidate was clearly better; the Blood Elf one follows the rig. A race the tables still lack

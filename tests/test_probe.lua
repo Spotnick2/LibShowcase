@@ -779,6 +779,17 @@ WoW.race, WoW.sex = { "High Order Skyborne", "Skyborne", 95 }, 3
 fp("steps ls framing")
 rec = record("framing")
 local shotsF = shots
+-- Mounted, or in gamepad mode, Open refuses (Codex, PR #61).
+local errs7 = #errors
+WoW.mounted = true
+S.Run()
+eq(rec.at, 1, "framing 1: refused while mounted")
+WoW.mounted = false
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return 1 end })
+S.Run()
+eq(rec.at, 1, "framing 1: refused in gamepad mode")
+rawset(_G, "C_InputInterfaceStyle", nil)
+check(not SC:IsActive(), "  and nothing presents")
 S.Run(); ticks(0.1, 20); S.Poll()
 check(tostring(rec.results[2].detail):find("race Skyborne (95), sex 3, zoom", 1, true), "framing 2: the race, sex and zoom read once settled")
 local z = LibStub("LibShowcase-1.0").state.cam.enterToZoom
@@ -793,6 +804,19 @@ S.Answer(true)
 S.Run(); untilEnded()
 eq(rec.status, "done", "the framing procedure finishes")
 eq(WoW.cvars.test_cameraOverShoulder, "0", "  the offset back with the presentation")
+-- A second run with the wait's Done pressed mid-entry: candidate A refuses,
+-- not reusing the first run's measurement (Codex, PR #61).
+WoW.advance(5)
+fp("steps ls framing")
+rec = record("framing")
+S.Run(); S.Next()
+local before = WoW.cvars.test_cameraOverShoulder
+S.Run()
+eq(rec.at, 3, "framing 3: Done mid-entry, candidate A refuses")
+eq(WoW.cvars.test_cameraOverShoulder, before, "  and writes no offset")
+fp("steps stop")
+win:Hide(); ticks(0.1, 20); WoW.flushTimers()
+expectedErrors = expectedErrors + (#errors - errs7)
 WoW.race, WoW.sex = { "Human", "Human", 1 }, 2
 
 -- #39's premise: one full turn timed at 90 and at 360.

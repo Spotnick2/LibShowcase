@@ -111,9 +111,10 @@ lib.SHOULDER_FACTORS = fill(lib.SHOULDER_FACTORS or {}, {
     [8]  = { 0.2787,  0.04   },  -- Troll
     [10] = { 0.361,  -0.1654 },  -- Blood Elf
     [11] = { 0.248,  -0.02   },  -- Draenei
-    -- Forever's Skyborne (#59): ChrModel 218/219, the Blood Elf skeletons
-    -- and camera data (forever-chrmodel-1.60.1.70959.csv), so the Blood Elf
-    -- pairs. Both race IDs share the models.
+    -- Forever's Skyborne (#59): ChrModel 218/219 share the Blood Elf models'
+    -- skeletons and camera distance (forever-chrmodel-1.60.1.70959.csv; the
+    -- scale and the customization camera's z offsets differ), so the Blood
+    -- Elf pairs. Both race IDs share the models. docs/DESIGN.md has the rest.
     [95] = { 0.361,  -0.1654 },  -- High Order Skyborne
     [96] = { 0.361,  -0.1654 },  -- Windshaper Skyborne
 })
