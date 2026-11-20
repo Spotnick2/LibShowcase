@@ -208,6 +208,11 @@ local M = {
     { "the centring restore skipped in gamepad mode", {
         { "            if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end\n",
           "            if cap[cvar] ~= nil and not I.GamepadMode() then pcall(SetCVar, cvar, cap[cvar]) end\n" } } },
+    -- #59: Skyborne takes the Blood Elf pairs (a male row removed falls back
+    -- to the same default pair: an equivalent mutant, not listed)
+    { "High Order Skyborne's female pair missing", { { "    [95] = { 0.3177,  0.0683 },  -- High Order Skyborne (#59)\n", "" } } },
+    { "Windshaper Skyborne's female pair missing", { { "    [96] = { 0.3177,  0.0683 },  -- Windshaper Skyborne\n", "" } } },
+    { "the Skyborne race file unknown", { { " Draenei = 11, Skyborne = 95,", " Draenei = 11," } } },
     -- #40: the pull countdown and the start timers bring the UI back
     { "a pull countdown not revealed", { { '    START_PLAYER_COUNTDOWN = function(_, timeRemaining)\n        return "countdown", tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },
     { "a start timer not revealed", { { '    START_TIMER         = function(timerType, timeRemaining)\n        return "timer:" .. tostring(Plain(timerType)), tonumber(Plain(timeRemaining)), true\n    end,\n', "" } } },

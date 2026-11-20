@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 10
+local MAJOR, MINOR = "LibShowcase-1.0", 11
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -111,6 +111,12 @@ lib.SHOULDER_FACTORS = fill(lib.SHOULDER_FACTORS or {}, {
     [8]  = { 0.2787,  0.04   },  -- Troll
     [10] = { 0.361,  -0.1654 },  -- Blood Elf
     [11] = { 0.248,  -0.02   },  -- Draenei
+    -- Forever's Skyborne (#59): ChrModel 218/219 share the Blood Elf models'
+    -- skeletons and camera distance (forever-chrmodel-1.60.1.70959.csv; the
+    -- scale and the customization camera's z offsets differ), so the Blood
+    -- Elf pairs. Both race IDs share the models. docs/DESIGN.md has the rest.
+    [95] = { 0.361,  -0.1654 },  -- High Order Skyborne
+    [96] = { 0.361,  -0.1654 },  -- Windshaper Skyborne
 })
 -- The same table's FEMALE column (#38): SHOULDER_FACTORS above is its male
 -- column, and the female framing differs (a female Human sits about 0.16
@@ -128,12 +134,14 @@ lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {
     [8]  = { 0.355,  -0.1317 },  -- Troll
     [10] = { 0.3177,  0.0683 },  -- Blood Elf
     [11] = { 0.3177,  0      },  -- Draenei
+    [95] = { 0.3177,  0.0683 },  -- High Order Skyborne (#59)
+    [96] = { 0.3177,  0.0683 },  -- Windshaper Skyborne
 })
 lib.MOUNTED_SHOULDER_FACTORS = fill(lib.MOUNTED_SHOULDER_FACTORS or {}, { 1.2495, -4.0 })
 -- UnitRace's second return (the race file) to the IDs above.
 lib.RACE_IDS = fill(lib.RACE_IDS or {}, {
     Human = 1, Orc = 2, Dwarf = 3, NightElf = 4, Scourge = 5, Undead = 5, Tauren = 6,
-    Gnome = 7, Troll = 8, BloodElf = 10, Draenei = 11,
+    Gnome = 7, Troll = 8, BloodElf = 10, Draenei = 11, Skyborne = 95,
 })
 
 -- The world name text (players, pets and minions, NPCs) hideWorldNames turns
