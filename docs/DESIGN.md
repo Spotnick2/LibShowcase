@@ -57,7 +57,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
 | `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
-| `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51) |
+| `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51). The login repair reads it at `PLAYER_LOGIN`, or inside `New` for an instance created after login: a consumer with its own slot sets it in `inst.opts` before `PLAYER_LOGIN` (its `ADDON_LOADED`), or passes it to `New` (#67) |
 | `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot`, or to the view the exit ends on (the player's own or the fallback; MINOR 13, #66) |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
@@ -124,16 +124,32 @@ owner.
     still gets the repair), not without a db, not while a presentation or another instance's
     lease holds the camera. A player who chose that view is moved once; on it, their camera
     didn't follow either.
+  - **The repair needs the consumer's slot by then** (#67, found by Codex on AltStable#475). It
+    compares `cameraView` with `savedViewSlot` as `inst.opts` holds it when it runs, and marks the
+    db whatever it finds. A consumer that copies its own slot into `inst.opts` only at `Enter`
+    is compared against the default 5 at login: a player stuck on the consumer's slot 3 isn't
+    moved, and the db is marked, so no later login tries again (and a player who chose view 5 is
+    moved for nothing). So a consumer with its own slot sets it before `PLAYER_LOGIN` (AltStable
+    does it at its `ADDON_LOADED`, AltStable 1f8fdc6), or passes it to `New` with its db
+    available then, when it creates the instance after login (the repair runs inside `New`).
+    The repair can't tell an omitted slot from 5: `New` copies the caller's options, then
+    `Migrate` fills the default into `inst.opts`, which is what the repair reads. Telling them
+    apart would take a marker set in `New` (a MINOR, and no help for existing instances).
+    A player the repair missed gets out at their next presentation by that consumer on a style
+    that follows (the exit ends on the fallback, since their own view is the saved slot); a
+    presentation by an addon with another slot keeps them on it.
   - **castAware never saves into the view the exit ends on** (MINOR 13, #66; found by Codex on
     PortalRoulette#40, reasoned from the code, not measured). castAware saves the settled
     presentation into `presentationViewSlot` (4) with `SaveView`. When that is the view the exit
     ends on (`OwnView`: the player's own, or the fallback), r12's exit would load the
     presentation's framing as theirs, and the client keeps `cameraView`, so every later login
-    too (on Never, the `cameraView` written back does the same at the next login). So `Enter`
-    drops the slot for that presentation (read at each `Enter`): nothing is saved, and a cast
-    takes the reset swing from view 2 instead of returning to a saved view. A view 4 an earlier
-    copy already overwrote stays overwritten; the library has no way to read the old framing.
-    Before r12 the exit ended on the saved view, so view 4 was overwritten but never loaded.
+    too (on Never, the `cameraView` written back does the same at the next login). So `Settle`
+    checks the capture right before the save: nothing is saved, and a cast takes the reset swing
+    from view 2 instead of returning to a saved view. The check is at the save, not at `Enter`,
+    so it also holds when this copy takes over an older copy's entry before it settles (the
+    older `cam.cfg` still names the slot; Codex, PR #68). A view 4 an earlier copy already
+    overwrote stays overwritten; the library has no way to read the old framing. Before r12 the
+    exit ended on the saved view, so view 4 was overwritten but never loaded.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

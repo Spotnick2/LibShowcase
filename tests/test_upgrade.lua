@@ -463,4 +463,31 @@ do
     eq(WoW.camera.zoom, 12, "  at the player's zoom")
 end
 
+-- #66 (Codex, PR #68): an r12 castAware entry on view 4 that this copy takes
+-- over before it settles. r12's cam.cfg still names slot 4; the settle runs
+-- here and must not save into the view the exit ends on.
+do
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    WoW.camera.savedViews[4] = 7              -- the player's own view 4
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r12"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette", castAware = true })
+    WoW.camera.zoom = 12
+    check(SC:Enter(newWindow("MEDIUM")), "r12 presents castAware, from view 4")
+    ticks(0.1, 3)
+    eq(loadCopy(copyOf(), "AltStable"), old, "the newer copy loads mid-entry")
+    eq(old.state.cam.cfg.presentationViewSlot, 4, "  r12's cfg still names slot 4")
+    ticks(0.1, 13)
+    check(not hasCall("SaveView(4)"), "  the settle under the newer copy does not save into view 4")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps the player's framing")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(old.state.cam.mode, "castReset", "  a cast takes the reset swing")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    ticks(0.1, 5)
+    SC:Exit("closed"); ticks(0.1, 6)
+    check(not SC:IsActive(), "  the exit completes")
+    eq(WoW.cvars.cameraView, "4", "  on the player's own view 4")
+    eq(WoW.camera.savedViews[4], 7, "  with its own framing")
+end
+
 done("test_upgrade")

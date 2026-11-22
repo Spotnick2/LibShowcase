@@ -1115,13 +1115,6 @@ function I.Enter(inst, anchor)
     -- The player's own view, where the exit ends (#51). Read before SetView
     -- moves it.
     if type(GetCVar) == "function" then capture.view = tonumber(GetCVar("cameraView")) end
-    -- castAware never saves into the view the exit ends on (#66): the exit
-    -- would load the presentation's framing as the player's own (on Never, at
-    -- the next login). A cast then takes the reset swing.
-    if cfg.presentationViewSlot and cfg.presentationViewSlot == I.OwnView(capture) then
-        cfg.presentationViewSlot = nil
-        if cfg.castAware then I.Debug(inst, "castAware: the player's own view is the presentation slot; not saved") end
-    end
     pcall(SaveView, capture.savedViewSlot)
     -- Crash self-heal: the capture lives in the consumer's SavedVariables
     -- until a restore clears it. Filled in as each CVar is changed.
@@ -1384,8 +1377,17 @@ end
 -- settled view is saved first so a cast can return to it.
 function I.Settle(cam)
     I.StopYaw()
-    if cam.cfg.castAware and cam.cfg.presentationViewSlot then
-        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false
+    local slot = cam.cfg.castAware and cam.cfg.presentationViewSlot
+    -- Never into the view the exit ends on (#66): the exit would load the
+    -- presentation's framing as the player's own (on Never, at the next
+    -- login). A cast then takes the reset swing. Checked here, at the save:
+    -- an older copy's entry this copy takes over settles with that copy's
+    -- cam.cfg (Codex, PR #68).
+    if slot and cam.capture and slot == I.OwnView(cam.capture) then
+        cam.presentationViewSaved = false
+        I.Debug(cam.inst, "castAware: the exit ends on the presentation slot " .. slot .. "; not saved")
+    elseif slot then
+        cam.presentationViewSaved = pcall(SaveView, slot) and true or false
     end
     if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
 end
