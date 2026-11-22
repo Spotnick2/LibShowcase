@@ -125,8 +125,9 @@ local M = {
     { "the exit ends on castAware's slot", { { " or v == cast then", " then" } } },
     { "the capture names no cast slot", { { "    if cfg.castAware and cfg.presentationViewSlot then capture.presentationViewSlot = cfg.presentationViewSlot end\n", "" } } },
     { "an older copy's exit keeps no cast slot", { { "    I.NoteCastSlot(cam)\n    cam.viewDone", "    cam.viewDone" } } },
-    { "an older copy's restore keeps no cast slot", { { "        I.NoteCastSlot(cam)\n        I.RestoreCapture", "        I.RestoreCapture" } } },
+    { "an older copy's restore keeps no cast slot", { { "        local moved = I.NoteCastSlot(cam)\n", "        local moved = false\n" } } },
     { "the fallback ignores castAware's slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    if slot ~= 2 then return 2 end" } } },
+    { "an older copy's started exit trusted", { { "cam.viewDone and not moved)", "cam.viewDone)" } } },
     { "castAware saves into the own view when the exit avoids it", { { "(slot == tonumber(cam.capture.view) or ", "(" } } },
     -- Review fixes (#4)
     { "a hidden UI does not lift the anchor", {
@@ -257,7 +258,7 @@ local M = {
     { "the exit leaves the zoom", { { "        pcall(SetView, I.OwnView(cap))\n        if type(GetCameraZoom) == \"function\" then I.SetZoom(cap.zoom or 0) end\n", "        pcall(SetView, I.OwnView(cap))\n" } } },
     { "the restore ends on the saved view", { { "pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)", "pcall(SetView, cap.savedViewSlot)" } } },
     { "the view set twice on an exit", { { "    if not (follows and viewDone == true) then\n", "    if true then\n" } } },
-    { "an older copy's exit taken as done", { { "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and cam.viewDone)", "I.RestoreCapture(cam.capture, cam.mode == \"exit\")" } } },
+    { "an older copy's exit taken as done", { { "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and cam.viewDone and not moved)", "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and not moved)" } } },
     { "the fallback is the saved slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    do return 2 end" } } },
     { "the repair goes to view 2 whatever the slot", { { "    local to = I.FallbackView(slot)\n", "    local to = 2\n" } } },
     { "Never treated as following", { { "    return style ~= 0\n", "    return true\n" } } },

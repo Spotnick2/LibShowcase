@@ -1258,12 +1258,17 @@ end
 
 -- An older copy's capture (r13 and before) doesn't name castAware's slot: it
 -- is taken from that presentation's cam.cfg when this copy settles, exits or
--- restores it (#72).
+-- restores it (#72). True when that moves the view the exit ends on: an
+-- exit the older copy already started went to the cast slot, so its
+-- cam.viewDone no longer holds (Codex, PR #73).
 function I.NoteCastSlot(cam)
     local cap, cfg = cam.capture, cam.cfg
     if cap and cfg and cfg.castAware and cfg.presentationViewSlot and cap.presentationViewSlot == nil then
+        local before = I.OwnView(cap)
         cap.presentationViewSlot = cfg.presentationViewSlot
+        return I.OwnView(cap) ~= before
     end
+    return false
 end
 
 -- #51. MEASURED 71037 (/fp steps ls savedview and viewfix, runs #572 to
@@ -1342,8 +1347,8 @@ function I.Restore(inst, reason)
     I.StopYaw()
     lib.animFrame:Hide()
     if cam.capture then
-        I.NoteCastSlot(cam)
-        I.RestoreCapture(cam.capture, cam.mode == "exit" and cam.viewDone)
+        local moved = I.NoteCastSlot(cam)
+        I.RestoreCapture(cam.capture, cam.mode == "exit" and cam.viewDone and not moved)
         local db = cam.inst and I.DB(cam.inst)
         if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end
     end
