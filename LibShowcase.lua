@@ -1503,7 +1503,10 @@ function I.ResetOrbitForCast()
         lib.animFrame:Hide()
     else
         cam.castResetDuration, cam.mode = CAST_RESET_YAW_DURATION, "castReset"
-        I.ApplyYaw((cam.yawDir or 1) * CAST_RESET_YAW_SPEED)
+        -- Scaled like the entry turn and the orbit (#39): the same angle
+        -- whatever the player's cameraYawMoveSpeed, now that every cast
+        -- takes this swing (Codex, PR #77).
+        I.ApplyYaw((cam.yawDir or 1) * CAST_RESET_YAW_SPEED * (180 / I.YawMoveSpeed()))
         lib.animFrame:Show()
     end
 end

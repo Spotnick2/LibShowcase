@@ -119,6 +119,7 @@ local M = {
     -- #75
     { "Enter saves on a following style", { { "    if not I.CameraFollows() and pcall(SaveView, cfg.savedViewSlot) then", "    if pcall(SaveView, cfg.savedViewSlot) then" } } },
     { "the capture claims a save that failed", { { "    if not I.CameraFollows() and pcall(SaveView, cfg.savedViewSlot) then", "    if not I.CameraFollows() and (pcall(SaveView, cfg.savedViewSlot) or true) then" } } },
+    { "the cast swing ignores the turn speed", { { "CAST_RESET_YAW_SPEED * (180 / I.YawMoveSpeed()))", "CAST_RESET_YAW_SPEED)" } } },
     { "castAware saves its settled view again", { { "    I.NoteCastSlot(cam)\n    if cam.cfg.orbit", "    I.NoteCastSlot(cam)\n    if cam.cfg.castAware and cam.cfg.presentationViewSlot then cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) end\n    if cam.cfg.orbit" } } },
     { "Never snaps back with nothing saved", { { "    return not I.CameraFollows() and cap.savedViewSlot ~= nil\n", "    return not I.CameraFollows()\n" } } },
     { "the own view ignores the configured slot", { { "    return tonumber(cap.viewSlot) or tonumber(cap.savedViewSlot)\n", "    return tonumber(cap.savedViewSlot)\n" } } },

@@ -95,7 +95,9 @@ owner.
     (r10's goes to the saved slot), or one that began on Never, is finished on the own view
     (Codex, PR #63).
   - **Never (0):** the exact snap-back to the saved view, as AltStable's block did, then the
-    `cameraView` CVar written back to the player's own view, so the next login loads theirs.
+    `cameraView` CVar written back to the player's own view, so the next login loads theirs. Only
+    when this presentation saved one, which means Never at `Enter` and a `SaveView` that ran
+    (MINOR 15, #75); otherwise the player's own view or the fallback, at their zoom (Codex, PR #77).
   - **Why:** MEASURED 71037 (`/fp steps ls savedview` and `viewfix`, runs #572 to #590,
     SPOTNICK3, on Always and on Only when moving; mouse and keyboard; the test: drag the camera
     to the side, let go, walk forward with W). The camera follows on view 2, also after
