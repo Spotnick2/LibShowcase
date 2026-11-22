@@ -1778,7 +1778,11 @@ Probe:Steps("savedview", {
         .. " Watch for that each time: a camera that stays where you left it is the bug. This resets your saved"
         .. " view 5 (the library has already overwritten it)." },
     { text = "Reading the view and the saved views.", auto = true, run = SVStart },
-    { text = "As it is now: " .. SV_ASK, ask = true },
+    -- The reporter's state, set up here whatever the start: r12's login
+    -- repair may already have moved this account off view 5 (Codex, PR #62).
+    { text = "Get stuck saves the camera into view 5 and puts it back with SetView(5), as an exit before r12 did.",
+      button = "Get stuck", run = function() return SVCall("SaveView", 5, "SetView", 5) end },
+    { text = "Stuck: " .. SV_ASK, ask = true },
     -- The reporter's fix, and whether it lasts.
     { text = "ResetView(5) is the reporter's fix.", button = "ResetView(5)", run = function() return SVCall("ResetView", 5) end },
     { text = "After ResetView(5): " .. SV_ASK, ask = true },
