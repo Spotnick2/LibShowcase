@@ -111,7 +111,7 @@ local M = {
     { "centring not restored", { { "            if cap[cvar] ~= nil then pcall(SetCVar, cvar, cap[cvar]) end\n", "" } } },
     { "the swing always turns right", { { "        local dir = cfg.yawOffset < 0 and -1 or 1\n", "        local dir = 1\n" } } },
     { "the presentation starts from view 3", { { "    pcall(SetView, 2)\n\n", "    pcall(SetView, 3)\n\n" } } },
-    { "Exit does not snap the view back", { { "    if cam.capture and cam.capture.savedViewSlot then pcall(SetView, cam.capture.savedViewSlot) end\n", "" } } },
+    { "Exit does not put the view back", { { "    if cam.capture then I.ExitView(cam.capture) end\n", "" } } },
     { "re-entry during exit resumes", { { '        I.Restore(inst, "re-enter during exit")\n', '        cam.mode = "enter"\n        do return true end\n' } } },
     { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex)" } } },
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
@@ -140,8 +140,8 @@ local M = {
         { '            if type(left) == "number" and left > 0 then return true end', "" } } },
     { "CANCEL_ALL_LOOT_ROLLS ends one roll", { { '        if key:sub(-1) == "*" then\n', "        if false then\n" } } },
     { "the heal ignores another instance's lease", {
-        { "    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end",
-          "    if st.cam.active then return false end" } } },
+        { "    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end\n    local db = I.DB(inst)\n    if not db then return false end",
+          "    if st.cam.active then return false end\n    local db = I.DB(inst)\n    if not db then return false end" } } },
     { "the reveal events not registered", {
         { "        pcall(lib.eventFrame.RegisterEvent, lib.eventFrame, ev)\n", "" } } },
     { "a missing shoulder CVar is created", {
@@ -154,7 +154,7 @@ local M = {
     -- Self-heal
     { "the capture not written to the db", { { "    if db then db[lib.DB_KEY] = capture end\n", "" } } },
     { "the capture left in the db", { { "        if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end\n", "" } } },
-    { "no heal at login", { { "        for _, inst in ipairs(lib.instances) do I.Heal(inst) end\n", "" } } },
+    { "no heal at login", { { "            I.Heal(inst)\n            I.RepairView(inst)\n", "            I.RepairView(inst)\n" } } },
     -- World names (#14)
     { "names hidden by default", { { "    hideWorldNames = false,\n    salute", "    hideWorldNames = true,\n    salute" } } },
     { "names never hidden", { { "function I.HideNames(inst)\n", "function I.HideNames(inst)\n    do return end\n" } } },
@@ -241,6 +241,21 @@ local M = {
     { "the female table replaced on load", { { "lib.FEMALE_SHOULDER_FACTORS = fill(lib.FEMALE_SHOULDER_FACTORS or {}, {", "lib.FEMALE_SHOULDER_FACTORS = fill({}, {" } } },
     { "an unknown race not sent to the default", { { "    if not lib.SHOULDER_FACTORS[id] then id = 0 end\n", "" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
+    -- #51: the view an exit ends on, and the login repair
+    { "the exit ends on the saved view", { { "        pcall(SetView, I.OwnView(cap))\n        if type(GetCameraZoom)", "        pcall(SetView, cap.savedViewSlot)\n        if type(GetCameraZoom)" } } },
+    { "the exit leaves the zoom", { { "        pcall(SetView, I.OwnView(cap))\n        if type(GetCameraZoom) == \"function\" then I.SetZoom(cap.zoom or 0) end\n", "        pcall(SetView, I.OwnView(cap))\n" } } },
+    { "the restore ends on the saved view", { { "pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)", "pcall(SetView, cap.savedViewSlot)" } } },
+    { "the view set twice on an exit", { { "    if not (follows and viewDone) then\n", "    if true then\n" } } },
+    { "Never treated as following", { { "    return style ~= 0\n", "    return true\n" } } },
+    { "the own view not captured", { { "    if type(GetCVar) == \"function\" then capture.view = tonumber(GetCVar(\"cameraView\")) end\n", "" } } },
+    { "the saved slot taken for the own view", { { " or v == cap.savedViewSlot then return 2 end", " then return 2 end" } } },
+    { "Never's cameraView not written back", { { "        pcall(SetCVar, \"cameraView\", tostring(I.OwnView(cap)))\n", "" } } },
+    { "no repair at login", { { "            I.Heal(inst)\n            I.RepairView(inst)\n", "            I.Heal(inst)\n" } } },
+    { "no repair at New after login", { { "        I.Heal(inst)\n        I.RepairView(inst)\n    end", "        I.Heal(inst)\n    end" } } },
+    { "the repair repeats", { { "    if not db or db[lib.VIEW_REPAIR_DB_KEY] then return false end\n", "    if not db then return false end\n" } } },
+    { "the repair runs on Never", { { "    if not I.CameraFollows() then return false end\n    db[lib.VIEW_REPAIR_DB_KEY] = true\n", "    db[lib.VIEW_REPAIR_DB_KEY] = true\n" } } },
+    { "the repair moves any view", { { "    if tonumber(GetCVar(\"cameraView\")) ~= slot then return false end\n", "" } } },
+    { "the repair during a presentation", { { "function I.RepairView(inst)\n    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end\n", "function I.RepairView(inst)\n" } } },
 }
 
 local source = read("LibShowcase.lua")

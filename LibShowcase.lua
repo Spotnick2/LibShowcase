@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 11
+local MAJOR, MINOR = "LibShowcase-1.0", 12
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -175,6 +175,8 @@ lib.DB_KEY = "LibShowcaseCapture"
 -- And the world-name capture (hideWorldNames), apart: an older copy healing
 -- LibShowcaseCapture must find the shape it knows.
 lib.NAMES_DB_KEY = "LibShowcaseNames"
+-- Set once the login repair of #51 has run for this db (MINOR 12).
+lib.VIEW_REPAIR_DB_KEY = "LibShowcaseViewRepaired"
 
 local POPUP_EVENT = "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"
 local CAST_RESET_YAW_SPEED = 0.78       -- PortalRoulette CameraMode.lua
@@ -1110,6 +1112,9 @@ function I.Enter(inst, anchor)
 
     local cfg = I.Config(inst)
     local capture = { savedViewSlot = cfg.savedViewSlot, zoom = tonumber(GetCameraZoom()) or 0 }
+    -- The player's own view, where the exit ends (#51). Read before SetView
+    -- moves it.
+    if type(GetCVar) == "function" then capture.view = tonumber(GetCVar("cameraView")) end
     pcall(SaveView, capture.savedViewSlot)
     -- Crash self-heal: the capture lives in the consumer's SavedVariables
     -- until a restore clears it. Filled in as each CVar is changed.
@@ -1208,19 +1213,63 @@ function I.Exit(inst, reason)
     I.ShowUI()
     I.StopYaw()
     cam.mode, cam.elapsed = "exit", 0
-    -- Snap the saved view back now; the rest is restored when the exit ends.
-    if cam.capture and cam.capture.savedViewSlot then pcall(SetView, cam.capture.savedViewSlot) end
+    -- The view back now; the rest is restored when the exit ends.
+    if cam.capture then I.ExitView(cam.capture) end
     lib.animFrame:Show()
     I.Debug(inst, "exit start: " .. tostring(reason or "hide"))
     return true
 end
 
--- Put the camera and every CVar back exactly as captured. Shared by every
--- restore and by the login self-heal. A nil capture entry means the CVar did
--- not exist: writing a default over it would invent a setting.
-function I.RestoreCapture(cap)
-    if cap.savedViewSlot and type(SetView) == "function" then pcall(SetView, cap.savedViewSlot) end
-    if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
+-- Camera Following Style (cameraSmoothStyle): 0 is "Never adjust camera";
+-- 1 "Only horizontal when moving", 4 "Only when moving" (the default) and 2
+-- "Always adjust camera" follow while moving. Missing or unreadable: follows.
+function I.CameraFollows()
+    local style = type(GetCVar) == "function" and tonumber(GetCVar("cameraSmoothStyle"))
+    return style ~= 0
+end
+
+-- The view an exit ends on: the player's own (cameraView at Enter), or 2 when
+-- that was the saved slot itself or isn't known (an older copy's capture).
+function I.OwnView(cap)
+    local v = tonumber(cap.view)
+    if not v or v < 1 or v > 5 or v == cap.savedViewSlot then return 2 end
+    return math.floor(v)
+end
+
+-- #51. MEASURED 70959+ (/fp steps ls savedview and viewfix, runs #572 to
+-- #590, on Always and on Only when moving): the camera follows on view 2,
+-- also after SaveView(5); SetView(5) onto the saved view stops it, and the
+-- client keeps cameraView, so every later login loads view 5 and it stays
+-- stopped (ResetView(5) helps only until then). SetView back to the player's
+-- view follows at once and after a /reload, at the cost of that view's
+-- framing: the zoom goes back after it. Writing only the cameraView CVar
+-- leaves the camera where it is and takes effect at the next login.
+-- So on a style that follows, the exit ends on the player's own view; on
+-- Never, it keeps the exact snap-back to the saved view, and the cameraView
+-- CVar is written back at the end (RestoreCapture).
+function I.ExitView(cap)
+    if not cap.savedViewSlot or type(SetView) ~= "function" then return end
+    if I.CameraFollows() then
+        pcall(SetView, I.OwnView(cap))
+        if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
+    else
+        pcall(SetView, cap.savedViewSlot)
+    end
+end
+
+-- Put the camera and every CVar back as captured. Shared by every restore
+-- and by the login self-heal. A nil capture entry means the CVar did not
+-- exist: writing a default over it would invent a setting. `viewDone`: an
+-- exit already put the view back (ExitView); on a style that follows, a
+-- second SetView would snap the zoom to the view's own again mid-animation.
+function I.RestoreCapture(cap, viewDone)
+    local follows = I.CameraFollows()
+    if not (follows and viewDone) then
+        if cap.savedViewSlot and type(SetView) == "function" then
+            pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)
+        end
+        if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
+    end
     if type(SetCVar) == "function" then
         if cap.cameraDistanceMaxZoomFactor then
             pcall(SetCVar, "cameraDistanceMaxZoomFactor", cap.cameraDistanceMaxZoomFactor)
@@ -1245,6 +1294,11 @@ function I.RestoreCapture(cap)
         if cap.viewBlendStyle ~= nil then pcall(SetCVar, "cameraViewBlendStyle", cap.viewBlendStyle) end
     end
     if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end
+    -- Never: the camera stays on the saved view's framing for this session,
+    -- and the next login loads the player's own view, not the saved one.
+    if not follows and cap.savedViewSlot and type(SetCVar) == "function" then
+        pcall(SetCVar, "cameraView", tostring(I.OwnView(cap)))
+    end
 end
 
 -- Everything back, at once: UI, camera, CVars, lifts. Protected
@@ -1255,7 +1309,7 @@ function I.Restore(inst, reason)
     I.StopYaw()
     lib.animFrame:Hide()
     if cam.capture then
-        I.RestoreCapture(cam.capture)
+        I.RestoreCapture(cam.capture, cam.mode == "exit")
         local db = cam.inst and I.DB(cam.inst)
         if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end
     end
@@ -1426,6 +1480,27 @@ end
 -- Events and hooks (installed once, dispatched through lib.impl)
 --------------------------------------------------------------------------------
 
+-- #51: r3 to r11 ended every presentation on the saved view, where the camera
+-- doesn't follow, and the client loads cameraView at every login: a player
+-- who ever saw one is still there. Once per consumer db, at login, on a style
+-- that follows: a player found on the saved view goes back to view 2. The
+-- camera has just been placed at login, so the move costs nothing. Not on
+-- Never (it follows nothing anyway), so a later switch to a following style
+-- still gets the repair. A player who chose that view is moved once.
+function I.RepairView(inst)
+    if st.cam.active or (st.owner ~= nil and st.owner ~= inst) then return false end
+    local db = I.DB(inst)
+    if not db or db[lib.VIEW_REPAIR_DB_KEY] then return false end
+    if type(GetCVar) ~= "function" or type(SetView) ~= "function" then return false end
+    if not I.CameraFollows() then return false end
+    db[lib.VIEW_REPAIR_DB_KEY] = true
+    local slot = I.Config(inst).savedViewSlot
+    if tonumber(GetCVar("cameraView")) ~= slot then return false end
+    pcall(SetView, 2)
+    I.Debug(inst, "on the saved view " .. slot .. " at login: back to view 2 (#51)")
+    return true
+end
+
 -- A capture still in a db at login means the last session ended without a
 -- restore (a crash, a killed client): put the player's camera back.
 function I.Heal(inst)
@@ -1453,7 +1528,10 @@ function I.OnEvent(event, ...)
     if I.OnPromptEvent(event, ...) then return end
     if event == "PLAYER_LOGIN" then
         I.InstallDialogHooks()
-        for _, inst in ipairs(lib.instances) do I.Heal(inst) end
+        for _, inst in ipairs(lib.instances) do
+            I.Heal(inst)
+            I.RepairView(inst)
+        end
         return
     end
     if event == "PLAYER_REGEN_ENABLED" then
@@ -1595,7 +1673,10 @@ function lib:New(opts)
     table.insert(lib.instances, inst)
     -- Created after login (a load-on-demand addon): heal now, not at a
     -- PLAYER_LOGIN that already happened.
-    if type(IsLoggedIn) == "function" and IsLoggedIn() then I.Heal(inst) end
+    if type(IsLoggedIn) == "function" and IsLoggedIn() then
+        I.Heal(inst)
+        I.RepairView(inst)
+    end
     return inst
 end
 

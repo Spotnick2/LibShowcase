@@ -565,7 +565,7 @@ do
     WoW.fire("PLAYER_LOGIN")
     eq(WoW.cvars.CameraKeepCharacterCentered, "1", "PLAYER_LOGIN puts the player's value back")
     eq(WoW.camera.pitchlimit, 88, "  and the pitch limit")
-    eq(WoW.camera.view, 5, "  and the saved view")
+    eq(WoW.camera.view, 2, "  and view 2: an older capture names no own view, and the saved one stops following (#51)")
     eq(DB2.LibShowcaseCapture, nil, "  and clears the capture")
     eq(WoW.popupShown, 0, "  without the experimental popup")
     local n = #WoW.calls
