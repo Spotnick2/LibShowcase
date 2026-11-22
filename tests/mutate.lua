@@ -118,9 +118,16 @@ local M = {
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
     { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, slot) and true or false\n", "" } } },
     -- #66
-    { "castAware saves into the own view", { { "    if slot and cam.capture and slot == I.OwnView(cam.capture) then", "    if false then" } } },
+    { "castAware saves into the own view", { { "    if slot and cam.capture and (slot == tonumber(cam.capture.view) or slot == I.OwnView(cam.capture)) then", "    if false then" } } },
     { "castAware skips only the own view, not the fallback", {
-        { "slot == I.OwnView(cam.capture)", "slot == cam.capture.view" } } },
+        { " or slot == I.OwnView(cam.capture))", ")" } } },
+    -- #72
+    { "the exit ends on castAware's slot", { { " or v == cast then", " then" } } },
+    { "the capture names no cast slot", { { "    if cfg.castAware and cfg.presentationViewSlot then capture.presentationViewSlot = cfg.presentationViewSlot end\n", "" } } },
+    { "an older copy's exit keeps no cast slot", { { "    I.NoteCastSlot(cam)\n    cam.viewDone", "    cam.viewDone" } } },
+    { "an older copy's restore keeps no cast slot", { { "        I.NoteCastSlot(cam)\n        I.RestoreCapture", "        I.RestoreCapture" } } },
+    { "the fallback ignores castAware's slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    if slot ~= 2 then return 2 end" } } },
+    { "castAware saves into the own view when the exit avoids it", { { "(slot == tonumber(cam.capture.view) or ", "(" } } },
     -- Review fixes (#4)
     { "a hidden UI does not lift the anchor", {
         { "        if anchor then I.Lift(inst, anchor, strata) end\n        return true\n", "        return true\n" } } },
@@ -251,11 +258,11 @@ local M = {
     { "the restore ends on the saved view", { { "pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)", "pcall(SetView, cap.savedViewSlot)" } } },
     { "the view set twice on an exit", { { "    if not (follows and viewDone == true) then\n", "    if true then\n" } } },
     { "an older copy's exit taken as done", { { "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and cam.viewDone)", "I.RestoreCapture(cam.capture, cam.mode == \"exit\")" } } },
-    { "the fallback is the saved slot", { { "    return tonumber(slot) == 2 and 3 or 2\n", "    return 2\n" } } },
+    { "the fallback is the saved slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    do return 2 end" } } },
     { "the repair goes to view 2 whatever the slot", { { "    local to = I.FallbackView(slot)\n", "    local to = 2\n" } } },
     { "Never treated as following", { { "    return style ~= 0\n", "    return true\n" } } },
     { "the own view not captured", { { "    if type(GetCVar) == \"function\" then capture.view = tonumber(GetCVar(\"cameraView\")) end\n", "" } } },
-    { "the saved slot taken for the own view", { { " or v == cap.savedViewSlot then return I.FallbackView(cap.savedViewSlot) end", " then return I.FallbackView(cap.savedViewSlot) end" } } },
+    { "the saved slot taken for the own view", { { " or v == cap.savedViewSlot or v == cast then", " or v == cast then" } } },
     { "Never's cameraView not written back", { { "        pcall(SetCVar, \"cameraView\", tostring(I.OwnView(cap)))\n", "" } } },
     { "no repair at login", { { "            I.Heal(inst)\n            I.RepairView(inst)\n", "            I.Heal(inst)\n" } } },
     { "no repair at New after login", { { "        I.Heal(inst)\n        I.RepairView(inst)\n    end", "        I.Heal(inst)\n    end" } } },

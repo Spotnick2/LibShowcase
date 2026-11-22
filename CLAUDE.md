@@ -59,7 +59,7 @@ function, option, default, public table or table key. A breaking change is `LibS
 - Public tables, filled in place: `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS`,
   `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`, `lib.WORLD_NAME_CVARS`.
 - The keys in a consumer's `db` table: `LibShowcaseCapture` (the camera's crash heal; keeps r3's
-  shape, plus `view` since MINOR 12), `LibShowcaseNames` (`hideWorldNames`) and
+  shape, plus `view` since MINOR 12 and `presentationViewSlot` with castAware since MINOR 14), `LibShowcaseNames` (`hideWorldNames`) and
   `LibShowcaseViewRepaired` (the once-only login repair of #51, MINOR 12).
 - **One owner.** The camera and the game UI are global, so `lib.state` holds one lease. Every
   mutation (UI hide, lift, camera, GameTooltip) needs it; another instance's calls are refused.
