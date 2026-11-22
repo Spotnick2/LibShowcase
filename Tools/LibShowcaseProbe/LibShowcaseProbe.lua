@@ -1721,6 +1721,31 @@ local function SVRead(tag)
     return line
 end
 
+-- r12's login repair (#51) moves a player found on view 5 to view 2, once per
+-- consumer db, at the first login on a following style. These procedures
+-- /reload on view 5 on purpose, so they start only once every loaded
+-- instance's db has had it (the newest copy runs every consumer's instance;
+-- Codex, PR #62). Nil when none is pending, or before r12.
+local function RepairPending()
+    local L = lib()
+    local key = L.VIEW_REPAIR_DB_KEY
+    if not key or type(L.impl) ~= "table" or type(L.impl.DB) ~= "function" then return nil end
+    local pending = {}
+    for _, inst in ipairs(L.instances or {}) do
+        local ok, db = pcall(L.impl.DB, inst)
+        if ok and type(db) == "table" and not db[key] then pending[#pending + 1] = tostring(inst.owner) end
+    end
+    return #pending > 0 and table.concat(pending, ", ") or nil
+end
+
+local function RefuseRepairPending()
+    local pending = RepairPending()
+    if pending then
+        error(("the library's login repair (#51) hasn't run yet for %s: it would move you off view 5 at a"
+            .. " /reload. Type /reload once on your own view (not 5) with this following style, then Retry"):format(pending), 0)
+    end
+end
+
 local function SVStart()
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local style = tostring(GetCVar("cameraSmoothStyle"))
@@ -1728,6 +1753,7 @@ local function SVStart()
         error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
             .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
     end
+    RefuseRepairPending()
     return SVRead("start")
 end
 
@@ -1791,7 +1817,7 @@ Probe:Steps("savedview", {
 --   reset  ResetView(5) while on view 5 (the reporter's macro)
 --   cvar   SetCVar("cameraView", the start's view): the index only
 --   view   SetView(the start's view), then the zoom put back
-local VF = { view = "2", zoom = nil }
+local VF = { zoom = nil, at = nil, before = nil }
 
 local function VFStart()
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
@@ -1800,6 +1826,7 @@ local function VFStart()
         error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
             .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
     end
+    RefuseRepairPending()
     local v = tostring(GetCVar("cameraView"))
     if v == "5" then error("on view 5 already: the start needs your own view. Type /run SetView(2), then Retry", 0) end
     LibShowcaseProbeDB.viewfix = { view = v }
@@ -1818,22 +1845,39 @@ local function VFStuck()
     return ("%s; zoom %s"):format(line, tostring(VF.zoom))
 end
 
+-- C puts back the zoom read just before its button, not Get stuck's: the step
+-- asks for a zoom-out in between (Codex, PR #62).
 local function VFTry(how)
-    local before = ("view %s, zoom %s"):format(tostring(GetCVar("cameraView")), tostring(GetCameraZoom()))
+    local zoomBefore = tonumber(GetCameraZoom())
+    local before = ("view %s, zoom %s"):format(tostring(GetCVar("cameraView")), tostring(zoomBefore))
     local back = VFView()
     if how == "reset" then
         ResetView(5)
     elseif how == "cvar" then
         SetCVar("cameraView", tostring(back))
     else
-        local zoom = VF.zoom or tonumber(GetCameraZoom())
+        local zoom = zoomBefore
         SetView(back)
         local now = tonumber(GetCameraZoom()) or zoom
         if zoom and now and math.abs(zoom - now) > 0.001 then
             if zoom > now then CameraZoomOut(zoom - now) else CameraZoomIn(now - zoom) end
         end
     end
+    VF.at, VF.before = GetTime(), zoomBefore
     return SVRead(("%s (from %s); zoom now %s"):format(how, before, tostring(GetCameraZoom())))
+end
+
+-- The zoom once the view's blend and the zoom have settled: the read right
+-- after SetView is the view's own (5.55, runs #577 to #590).
+local VF_SETTLE = 2
+local function VFSettled()
+    if not VF.at then return true, "no candidate pressed in this session" end
+    if GetTime() - VF.at < VF_SETTLE then return false, "settling" end
+    local line = ("settled: zoom %s (before the button %s), cameraView %s"):format(tostring(GetCameraZoom()),
+        tostring(VF.before), tostring(GetCVar("cameraView")))
+    say("  viewfix " .. line)
+    VF.at = nil
+    return true, line
 end
 
 local VF_JUMP = "Did the camera jump or move when you pressed it (say how in the Note box)?"
@@ -1845,6 +1889,7 @@ local function VFCandidate(label, how, what)
         { text = "Stuck (the control, it shouldn't): " .. SV_ASK, ask = true },
         { text = ("Zoom out a little and drag the camera to look at the character from the side, leave it there, then"
             .. " press the button: %s"):format(what), button = label, run = function() return VFTry(how) end },
+        { text = "Reading the zoom once the camera has settled (2 seconds).", timeout = 10, wait = VFSettled },
         { text = VF_JUMP, ask = true },
         { text = "Now: " .. SV_ASK, ask = true },
         { text = "Type /reload: does it last?", reload = true },

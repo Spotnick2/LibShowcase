@@ -889,6 +889,13 @@ S.Run()
 eq(rec.at, 2, "savedview 2: refused on Never (0)")
 check(logHas("Camera Following Style is 0 (Never adjust camera), which never follows"), "  saying why")
 WoW.cvars.cameraSmoothStyle = "2"
+-- r12's login repair not yet run for a db: it would undo a /reload on view 5
+-- (Codex, PR #62).
+LibShowcaseProbeDB.LibShowcaseViewRepaired = nil
+S.Run()
+eq(rec.at, 2, "savedview 2: refused while the login repair is pending")
+check(logHas("the library's login repair (#51) hasn't run yet for LibShowcaseProbe"), "  naming the instance")
+LibShowcaseProbeDB.LibShowcaseViewRepaired = true
 S.Run()
 local start = tostring(rec.results[2].detail)
 check(start:find("start: cameraView 5", 1, true), "savedview 2: the view read")
@@ -928,7 +935,7 @@ eq(rec.status, "done", "the savedview procedure finishes")
 eq(WoW.camera.savedViews[5], nil, "  its cleanup reset saved view 5")
 eq(WoW.cvars.cameraView, "2", "  on view 2")
 expectedErrors = expectedErrors + (#errors - errs4)
-eq(#errors - errs4, 2, "  two refusals: gamepad mode, Never")
+eq(#errors - errs4, 3, "  three refusals: gamepad mode, Never, the pending repair")
 WoW.cvars.cameraSmoothStyle = "4"
 rawset(_G, "C_CVar", hadCVar2)
 rawset(_G, "C_InputInterfaceStyle", nil)
@@ -954,31 +961,41 @@ local function stuck(i)
     eq(WoW.cvars.cameraView, "5", "  then SetView(5)")
     S.Answer(false)
 end
+local function settled(i)
+    eq(rec.at, i, ("viewfix %d: waiting for the camera to settle"):format(i))
+    WoW.advance(3); S.Poll()
+end
 -- A: ResetView(5).
 stuck(3)
 WoW.camera.savedViews[5] = 9
 S.Run()
 eq(WoW.camera.savedViews[5], nil, "viewfix 5: ResetView(5)")
 check(tostring(rec.results[5].detail):find("reset (from view 5, zoom 9)", 1, true), "  read, with the state before")
+settled(6)
+check(tostring(rec.results[6].detail):find("settled: zoom 9 (before the button 9), cameraView 5", 1, true), "  the settled zoom read")
 S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
 -- B: the CVar only.
-stuck(11)
+stuck(12)
 local from = #WoW.calls
 S.Run()
-eq(WoW.cvars.cameraView, "3", "viewfix 13: the CVar written back to the start's view")
+eq(WoW.cvars.cameraView, "3", "viewfix 14: the CVar written back to the start's view")
 local setViews = 0
 for i = from + 1, #WoW.calls do if WoW.calls[i]:find("^SetView") then setViews = setViews + 1 end end
 eq(setViews, 0, "  with no SetView")
+settled(15)
 S.Answer(true); S.Answer(true); S.Next(); S.Answer(false)
--- C: SetView, then the zoom put back.
-stuck(19)
-WoW.camera.zoom = 4   -- what SetView(3) would leave
+-- C: SetView, then the zoom read just before the button put back: Get stuck
+-- read 9, the tester zoomed out to 12, SetView leaves 4 (Codex, PR #62).
+stuck(21)
+WoW.camera.zoom = 12
 local realSetView = SetView
 rawset(_G, "SetView", function(slot) realSetView(slot); WoW.camera.zoom = 4 end)
 S.Run()
 rawset(_G, "SetView", realSetView)
-eq(WoW.cvars.cameraView, "3", "viewfix 21: SetView to the start's view")
-eq(WoW.camera.zoom, 9, "  and the zoom put back")
+eq(WoW.cvars.cameraView, "3", "viewfix 23: SetView to the start's view")
+eq(WoW.camera.zoom, 12, "  and the zoom from just before the button put back, not Get stuck's")
+settled(24)
+check(tostring(rec.results[24].detail):find("settled: zoom 12 (before the button 12), cameraView 3", 1, true), "  the settled zoom read")
 S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
 eq(rec.status, "done", "the viewfix procedure finishes")
 eq(WoW.cvars.cameraView, "3", "  back on the start's view")
