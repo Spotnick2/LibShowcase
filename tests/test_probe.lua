@@ -1011,6 +1011,60 @@ expectedErrors = expectedErrors + (#errors - errs5)
 eq(#errors - errs5, 1, "  one refusal, view 5 at the start")
 WoW.cvars.cameraSmoothStyle = "4"
 
+-- The r12 release check (#51): a real presentation's exit on Only when moving
+-- and on Always, the login repair, view 3.
+local errs6 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "2", "3"
+WoW.camera.zoom = 12
+fp("steps ls r12view")
+rec = record("r12view")
+S.Next()
+S.Run()
+eq(rec.at, 2, "r12view 2: refused on Always where Only when moving is asked")
+check(logHas("Camera Following Style is 2 (Always adjust camera): set it to Only when moving"), "  saying why")
+local function exitPart(first, styleName)
+    S.Run()
+    check(SC:IsActive(), ("r12view %d: presenting on %s"):format(first, styleName))
+    S.Run()   -- Close
+    untilEnded()
+    WoW.advance(3); S.Poll()
+    local r = rec.results[first + 2]
+    check(tostring(r.detail):find("ended on cameraView 3 (own 3), zoom 12 (at Open 12)", 1, true),
+        ("r12view %d: the exit ended on the own view at the zoom of Open"):format(first + 2))
+    eq(r.check, "PASS", "  PASS")
+    S.Answer(true); S.Answer(true)
+    S.Next()   -- the /reload
+    eq(rec.results[first + 6].check, "PASS", ("r12view %d: still the own view after the /reload"):format(first + 6))
+    S.Answer(true)
+end
+WoW.cvars.cameraSmoothStyle = "4"
+exitPart(2, "Only when moving")
+WoW.cvars.cameraSmoothStyle = "2"
+exitPart(10, "Always")
+-- The login repair, through the probe's own db.
+LibShowcaseProbeDB.LibShowcaseViewRepaired = true
+S.Run()
+eq(WoW.cvars.cameraView, "5", "r12view 18: stuck on view 5")
+eq(LibShowcaseProbeDB.LibShowcaseViewRepaired, nil, "  the probe's repair flag cleared")
+S.Answer(false)
+WoW.fire("PLAYER_LOGIN")   -- the /reload's login, then the read
+S.Next()
+eq(WoW.cvars.cameraView, "2", "r12view 21: the login repair moved it to view 2")
+eq(rec.results[21].check, "PASS", "  PASS, with the flag set")
+S.Answer(true)
+-- View 3.
+S.Run()
+eq(WoW.cvars.cameraView, "3", "r12view 23: SetView(3)")
+S.Answer(true)
+S.Next()
+eq(rec.results[26].check, "PASS", "r12view 26: still view 3 after the /reload")
+S.Answer(true)
+eq(rec.status, "done", "the r12view procedure finishes")
+eq(WoW.cvars.cameraView, "2", "  back on view 2")
+expectedErrors = expectedErrors + (#errors - errs6)
+eq(#errors - errs6, 1, "  one refusal, the wrong style")
+WoW.cvars.cameraSmoothStyle = "4"
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
