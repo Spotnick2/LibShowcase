@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 12
+local MAJOR, MINOR = "LibShowcase-1.0", 13
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1377,8 +1377,17 @@ end
 -- settled view is saved first so a cast can return to it.
 function I.Settle(cam)
     I.StopYaw()
-    if cam.cfg.castAware and cam.cfg.presentationViewSlot then
-        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false
+    local slot = cam.cfg.castAware and cam.cfg.presentationViewSlot
+    -- Never into the view the exit ends on (#66): the exit would load the
+    -- presentation's framing as the player's own (on Never, at the next
+    -- login). A cast then takes the reset swing. Checked here, at the save:
+    -- an older copy's entry this copy takes over settles with that copy's
+    -- cam.cfg (Codex, PR #68).
+    if slot and cam.capture and slot == I.OwnView(cam.capture) then
+        cam.presentationViewSaved = false
+        I.Debug(cam.inst, "castAware: the exit ends on the presentation slot " .. slot .. "; not saved")
+    elseif slot then
+        cam.presentationViewSaved = pcall(SaveView, slot) and true or false
     end
     if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
 end
