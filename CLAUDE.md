@@ -32,7 +32,7 @@ requests here.
   (preflight: the XML, every file it loads, LICENSE).
   **`Tools\LibShowcaseProbe\`**: the developer probe, a **ForeverProbe module** (`/fp ls`; was
   `/lsprobe`, #26) for the in-game measurements the design still depends on. Each one the owner
-  does by hand is a procedure (`/fp steps ls pitch|nudge|combat|prompts|invite|names|rereg|sound|follow|view|tempcvar|savedview|viewfix|r12view|r13cast|view4|release|orbitspeed|framing`).
+  does by hand is a procedure (`/fp steps ls pitch|nudge|combat|prompts|invite|names|rereg|sound|follow|view|tempcvar|savedview|viewfix|r12view|castview|view4|release|orbitspeed|framing`).
   `Tools\deploy-probe.ps1` deploys ForeverProbe (`..\ForeverProbe`), then this checkout into the
   probe's `Libs\`, then the module. Never shipped. Follow `References\Docs\PROBES.md` and
   ForeverProbe's `docs\GUIDE.md`; after the owner's `/reload`, read `LibShowcaseProbe.lua` and
