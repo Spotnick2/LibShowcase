@@ -20,6 +20,13 @@
 --   then failed with ADDON_ACTION_FORBIDDEN), so the library never touches a
 --   dialog and brings the UI back instead. An intentional divergence: no
 --   scenario here shows a dialog; test_lease.lua covers the new behaviour.
+-- - The view an exit ends on (#51, MINOR 12). The block ended on the saved
+--   view, where the camera stops following (MEASURED 70959+). Every scenario
+--   here runs on Camera Following Style Never (cameraSmoothStyle 0), where
+--   the library still snaps back to the saved view exactly as the block did;
+--   it then writes the cameraView CVar back to the player's own view, which
+--   is left out (the SetCVar call and the CVar). On a style that follows it
+--   ends on the player's own view instead: test_presentation.lua.
 dofile("tests/wow_stubs.lua")
 dofile("tests/harness.lua")
 
@@ -69,7 +76,7 @@ end
 local function record(win)
     local calls = {}
     for _, c in ipairs(WoW.calls) do
-        if not IGNORED[c:match("^(%w+)")] then calls[#calls + 1] = c end
+        if not IGNORED[c:match("^(%w+)")] and not c:find("^SetCVar%(cameraView,") then calls[#calls + 1] = c end
     end
     local function frameCalls(w)
         local t = {}
@@ -86,7 +93,7 @@ local function record(win)
         return t
     end
     local cv = {}
-    for k, v in pairs(WoW.cvars) do cv[#cv + 1] = k .. "=" .. v end
+    for k, v in pairs(WoW.cvars) do if k ~= "cameraView" then cv[#cv + 1] = k .. "=" .. v end end
     table.sort(cv)
     return {
         calls = calls, win = frameCalls(win), tip = frameCalls(GameTooltip),
@@ -102,6 +109,7 @@ local function setup(env)
     WoW.resetLibStub()
     if env.mounted then WoW.mounted = true end
     if env.race then WoW.race = env.race end
+    WoW.cvars.cameraSmoothStyle = "0"   -- Never: the block's saved-view exit (#51)
     for k, v in pairs(env.cvars or {}) do WoW.cvars[k] = v ~= false and v or nil end
 end
 
