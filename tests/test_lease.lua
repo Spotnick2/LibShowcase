@@ -537,7 +537,8 @@ do
     SC:Enter()
     local cap = DB.LibShowcaseCapture
     check(type(cap) == "table", "Enter writes the capture to the db")
-    eq(cap.savedViewSlot, 5, "  the view slot")
+    eq(cap.viewSlot, 5, "  the configured view slot")
+    eq(cap.savedViewSlot, nil, "  and no saved view on a following style (#75)")
     eq(cap.zoom, 4, "  the zoom")
     eq(cap.CameraKeepCharacterCentered, "1", "  each centring CVar")
     eq(cap.shoulderOffset, 0, "  the shoulder offset")

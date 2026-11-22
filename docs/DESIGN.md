@@ -57,11 +57,11 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
 | `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
-| `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51). The login repair reads it at `PLAYER_LOGIN`, or inside `New` for an instance created after login: a consumer with its own slot sets it in `inst.opts` before `PLAYER_LOGIN` (its `ADDON_LOADED`), or passes it to `New` (#67) |
-| `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot`, or to the player's own view or the view the exit ends on (MINOR 13, #66). With castAware the exit doesn't end on it: a written view stops following (MINOR 14, #72, MEASURED 71037). The exception: when the two slots are views 2 and 3 (either way round), they take both fallback views, so an exit that needs the fallback ends on the cast slot (never the saved slot), and nothing is saved into it then |
+| `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's entry framing into (`SaveView`) when Camera Following Style is Never at `Enter` (MINOR 15, #75; before, at every `Enter`). A restore on Never returns to that snapshot if this presentation saved it (MINOR 12, #51); every other restore ends on the player's own view or the fallback, at their zoom. The configured slot still guides the fallback and the once-only login repair. The login repair reads it at `PLAYER_LOGIN`, or inside `New` for an instance created after login: a consumer with its own slot sets it in `inst.opts` before `PLAYER_LOGIN` (its `ADDON_LOADED`), or passes it to `New` (#67) |
+| `presentationViewSlot` | 4 | With castAware: the slot older copies saved the settled framing into (MINOR 15 saves nothing, #75; one an older copy already saved in a live presentation is still returned to). With castAware the exit doesn't end on it: a written view stops following (MINOR 14, #72, MEASURED 71037). The exception: when the two slots are views 2 and 3 (either way round), they take both fallback views, so an exit that needs the fallback ends on the cast slot (never the saved slot), and nothing is saved into it then |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
-| `castAware` | false | PortalRoulette: a player cast returns to the settled view and holds still; its end resumes the orbit |
+| `castAware` | false | Portal Roulette and 123: a player cast or channel stops the orbit, the camera makes a short swing from view 2 back into the entry framing, then holds still; the end of the cast (and of the swing) resumes the orbit. Until MINOR 14 a cast returned to the settled view saved in `presentationViewSlot` (#75) |
 | `dynamicPitch` | false | `test_cameraDynamicPitch` = 1. MEASURED 70959 (`/fp steps ls pitch`, 2026-11-19, centring cleared): the write raises the camera angle at once (the character lower on screen, more above it in view), the angle follows the zoom, nothing follows the movement, and the view comes back on restore. Clearing centring alone moved nothing. 69913 had read it as inert |
 | `pitchLimit` | nil | `ConsoleExec("pitchlimit N")`, `pitchlimit 88` on restore |
 | `viewBlendStyle` | nil | `cameraViewBlendStyle` |
@@ -83,7 +83,7 @@ owner.
 ## Guarantees
 
 - **The view an exit ends on** (MINOR 12, #51). `Enter` captures the player's view (`cameraView`),
-  saves their camera into `savedViewSlot` and switches to view 2. The exit depends on Camera
+  saves their camera into `savedViewSlot` on Never only (MINOR 15, #75) and switches to view 2. The exit depends on Camera
   Following Style (`cameraSmoothStyle`; the dropdown: 1 "Only horizontal when moving", 4 "Only when
   moving", the default, 2 "Always adjust camera", 0 "Never adjust camera"):
   - **A style that follows (1, 2, 4):** the exit ends on the player's own view and puts the zoom
@@ -95,7 +95,9 @@ owner.
     (r10's goes to the saved slot), or one that began on Never, is finished on the own view
     (Codex, PR #63).
   - **Never (0):** the exact snap-back to the saved view, as AltStable's block did, then the
-    `cameraView` CVar written back to the player's own view, so the next login loads theirs.
+    `cameraView` CVar written back to the player's own view, so the next login loads theirs. Only
+    when this presentation saved one, which means Never at `Enter` and a `SaveView` that ran
+    (MINOR 15, #75); otherwise the player's own view or the fallback, at their zoom (Codex, PR #77).
   - **Why:** MEASURED 71037 (`/fp steps ls savedview` and `viewfix`, runs #572 to #590,
     SPOTNICK3, on Always and on Only when moving; mouse and keyboard; the test: drag the camera
     to the side, let go, walk forward with W). The camera follows on view 2, also after
@@ -193,6 +195,29 @@ owner.
     behind the character, not on the front view 4 (yes), and it followed (yes), still view 2 after
     a `/reload` and following (yes). A note typed on the Close step, before Close: "not completely
     behind" (the presentation's settled angle, before the exit). No error in Bugsy.
+- **No view is written on a style that follows** (MINOR 15, #75; Codex consult, two rounds). A view
+  written with `SaveView` never follows again, the client keeps it for the account in
+  `config-cache.wtf`, `ResetView` undoes it for the session only, and addon code can't clear it
+  (MEASURED 71037, #72 and #75). Since MINOR 12 the exit doesn't use the entry save on a following
+  style, and every player who picked view 4 or 5 later got a camera that doesn't follow. So:
+  - `Enter` saves into `savedViewSlot` only when the style is Never at `Enter`. The capture's
+    `savedViewSlot` means "this presentation saved there", as every older copy reads it, and is
+    set only after the save ran; `capture.viewSlot` keeps the configured slot for the own-view
+    rules (`I.CaptureSlot`, falling back to an older capture's `savedViewSlot`). An older copy
+    healing a capture with nothing saved never selects the slot (they all test
+    `cap.savedViewSlot`).
+  - A restore (the exit, `ForceRestore`, the crash heal) snaps back to the saved view only on Never
+    with a snapshot (`I.SnapBack`); otherwise it ends on the player's own view and zoom. That holds
+    when the style changes mid-presentation either way, and during the exit animation: `viewDone`
+    counts only while the destination is still the own view.
+  - castAware saves no settled view: every cast takes the reset swing (`castReset`, then
+    `castHold`), measured in game in run #608. A live presentation an older copy already saved
+    (`presentationViewSaved`) still returns to it at a cast. r14's destination rules stay: an
+    earlier copy may have written either slot.
+  - No per-login `ResetView`: it can't tell a player's deliberate save from a library write, and it
+    would cost a Never player their preset. The #51 login repair stays as it is.
+  - Players already left with a written view 4 or 5 keep it (nothing can clear it); MINOR 15 stops
+    adding to it.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

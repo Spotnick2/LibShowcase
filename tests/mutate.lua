@@ -116,11 +116,15 @@ local M = {
     { "shoulder multiplier ignored", { { "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex) * cfg.shoulderMult", "    return I.ShoulderOffsetFor(race, cfg.shoulderRef or zoom, nil, sex)" } } },
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
-    { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, slot) and true or false\n", "" } } },
+    -- #75
+    { "Enter saves on a following style", { { "    if not I.CameraFollows() and pcall(SaveView, cfg.savedViewSlot) then", "    if pcall(SaveView, cfg.savedViewSlot) then" } } },
+    { "the capture claims a save that failed", { { "    if not I.CameraFollows() and pcall(SaveView, cfg.savedViewSlot) then", "    if not I.CameraFollows() and (pcall(SaveView, cfg.savedViewSlot) or true) then" } } },
+    { "the cast swing ignores the turn speed", { { "CAST_RESET_YAW_SPEED * (180 / I.YawMoveSpeed()))", "CAST_RESET_YAW_SPEED)" } } },
+    { "castAware saves its settled view again", { { "    I.NoteCastSlot(cam)\n    if cam.cfg.orbit", "    I.NoteCastSlot(cam)\n    if cam.cfg.castAware and cam.cfg.presentationViewSlot then cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) end\n    if cam.cfg.orbit" } } },
+    { "Never snaps back with nothing saved", { { "    return not I.CameraFollows() and cap.savedViewSlot ~= nil\n", "    return not I.CameraFollows()\n" } } },
+    { "the own view ignores the configured slot", { { "    return tonumber(cap.viewSlot) or tonumber(cap.savedViewSlot)\n", "    return tonumber(cap.savedViewSlot)\n" } } },
+    { "an older capture's slot ignored", { { "    return tonumber(cap.viewSlot) or tonumber(cap.savedViewSlot)\n", "    return tonumber(cap.viewSlot)\n" } } },
     -- #66
-    { "castAware saves into the own view", { { "    if slot and cam.capture and (slot == tonumber(cam.capture.view) or slot == I.OwnView(cam.capture)) then", "    if false then" } } },
-    { "castAware skips only the own view, not the fallback", {
-        { " or slot == I.OwnView(cam.capture))", ")" } } },
     -- #72
     { "the exit ends on castAware's slot", { { " or v == cast then", " then" } } },
     { "the capture names no cast slot", { { "    if cfg.castAware and cfg.presentationViewSlot then capture.presentationViewSlot = cfg.presentationViewSlot end\n", "" } } },
@@ -128,7 +132,6 @@ local M = {
     { "an older copy's restore keeps no cast slot", { { "        local moved = I.NoteCastSlot(cam)\n", "        local moved = false\n" } } },
     { "the fallback ignores castAware's slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    if slot ~= 2 then return 2 end" } } },
     { "an older copy's started exit trusted", { { "cam.viewDone and not moved)", "cam.viewDone)" } } },
-    { "castAware saves into the own view when the exit avoids it", { { "(slot == tonumber(cam.capture.view) or ", "(" } } },
     -- Review fixes (#4)
     { "a hidden UI does not lift the anchor", {
         { "        if anchor then I.Lift(inst, anchor, strata) end\n        return true\n", "        return true\n" } } },
@@ -254,16 +257,16 @@ local M = {
     { "an unknown race not sent to the default", { { "    if not lib.SHOULDER_FACTORS[id] then id = 0 end\n", "" } } },
     { "the reveal told at once in the lockdown", { { "    I.ShowUI()\n    if st.uiHidden then\n", "    I.ShowUI()\n    if false then\n" } } },
     -- #51: the view an exit ends on, and the login repair
-    { "the exit ends on the saved view", { { "        pcall(SetView, I.OwnView(cap))\n        if type(GetCameraZoom)", "        pcall(SetView, cap.savedViewSlot)\n        if type(GetCameraZoom)" } } },
-    { "the exit leaves the zoom", { { "        pcall(SetView, I.OwnView(cap))\n        if type(GetCameraZoom) == \"function\" then I.SetZoom(cap.zoom or 0) end\n", "        pcall(SetView, I.OwnView(cap))\n" } } },
-    { "the restore ends on the saved view", { { "pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)", "pcall(SetView, cap.savedViewSlot)" } } },
-    { "the view set twice on an exit", { { "    if not (follows and viewDone == true) then\n", "    if true then\n" } } },
+    { "the exit ends on the saved view", { { "    pcall(SetView, I.OwnView(cap))\n    if type(GetCameraZoom)", "    pcall(SetView, cap.viewSlot)\n    if type(GetCameraZoom)" } } },
+    { "the exit leaves the zoom", { { "    pcall(SetView, I.OwnView(cap))\n    if type(GetCameraZoom) == \"function\" then I.SetZoom(cap.zoom or 0) end\n    return true", "    pcall(SetView, I.OwnView(cap))\n    return true" } } },
+    { "the restore ends on the saved view", { { "pcall(SetView, snap and cap.savedViewSlot or I.OwnView(cap))", "pcall(SetView, cap.savedViewSlot or cap.viewSlot)" } } },
+    { "the view set twice on an exit", { { "    if snap or viewDone ~= true then\n", "    if true then\n" } } },
     { "an older copy's exit taken as done", { { "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and cam.viewDone and not moved)", "I.RestoreCapture(cam.capture, cam.mode == \"exit\" and not moved)" } } },
     { "the fallback is the saved slot", { { "    if slot ~= 2 and other ~= 2 then return 2 end", "    do return 2 end" } } },
     { "the repair goes to view 2 whatever the slot", { { "    local to = I.FallbackView(slot)\n", "    local to = 2\n" } } },
     { "Never treated as following", { { "    return style ~= 0\n", "    return true\n" } } },
     { "the own view not captured", { { "    if type(GetCVar) == \"function\" then capture.view = tonumber(GetCVar(\"cameraView\")) end\n", "" } } },
-    { "the saved slot taken for the own view", { { " or v == cap.savedViewSlot or v == cast then", " or v == cast then" } } },
+    { "the saved slot taken for the own view", { { " or v == slot or v == cast then", " or v == cast then" } } },
     { "Never's cameraView not written back", { { "        pcall(SetCVar, \"cameraView\", tostring(I.OwnView(cap)))\n", "" } } },
     { "no repair at login", { { "            I.Heal(inst)\n            I.RepairView(inst)\n", "            I.Heal(inst)\n" } } },
     { "no repair at New after login", { { "        I.Heal(inst)\n        I.RepairView(inst)\n    end", "        I.Heal(inst)\n    end" } } },
