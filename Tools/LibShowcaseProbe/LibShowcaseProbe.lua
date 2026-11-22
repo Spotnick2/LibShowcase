@@ -47,6 +47,9 @@
 --             too, view 4 untouched
 --   view4     does view 4 follow: at its default, and after SaveView(4) from
 --             view 2 then SetView(4), each across a /reload (#66, run #601)?
+--   r15check  the r15 release check (#75): castAware on a following style
+--             writes no view (SaveView counted), the cast swing, the exit
+--             following; Portal Roulette's own cast; Never's one save
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -2336,6 +2339,187 @@ do
         run = function() return SVCall("ResetView", 4, "SetView", 2) end }
     Probe:Steps("view4", steps)
 end
+
+-- 24. The r15 release check (#75). MINOR 15 writes no view on a style that
+-- follows (a written view never follows again, MEASURED 71037), saves the
+-- player's camera only on Never, and castAware's casts take the reset swing.
+-- Every SaveView call is counted through a post-hook (any addon's, so a
+-- consumer's presentation counts too). Part 1: castAware on Only when
+-- moving: no SaveView, the cast's swing, the exit on the player's view,
+-- following, also after a /reload. Part 2: a consumer's own presentation
+-- (Portal Roulette's teleport or portal cast): no SaveView. Part 3: Never:
+-- exactly one SaveView, the snap-back, cameraView written back.
+local R15 = { obs = {}, saves = 0 }
+if type(hooksecurefunc) == "function" and type(SaveView) == "function" then
+    hooksecurefunc("SaveView", function(slot)
+        R15.saves = R15.saves + 1
+        R15.lastSave = tostring(slot)
+    end)
+end
+
+local function R15Saved()
+    LibShowcaseProbeDB.r15 = type(LibShowcaseProbeDB.r15) == "table" and LibShowcaseProbeDB.r15 or {}
+    return LibShowcaseProbeDB.r15
+end
+local function R15Check(key)
+    return function()
+        local v = R15.obs[key]
+        if not v then return false, key .. ": not observed (Done before it was read)" end
+        return v[1], v[2]
+    end
+end
+local function R15Observe(key, ok, line, prefix)
+    R15.obs[key] = { ok, line }
+    say((prefix or "  ") .. "r15check " .. line)
+    return true, line
+end
+
+local function R15Style(want)
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    local ok = want == "0" and style == "0" or want ~= "0" and FOLLOWING_STYLES[style]
+    if not ok then
+        error(("Camera Following Style is %s (%s): set it to %s (Options > Controls > Camera), then Retry")
+            :format(style, STYLE_NAMES[style] or "?", STYLE_NAMES[want]), 0)
+    end
+end
+
+-- A new run starts with nothing from an earlier one, reset before the guards.
+local function R15Start()
+    LibShowcaseProbeDB.r15, R15.obs = {}, {}
+    local minor = select(2, LibStub:GetLibrary("LibShowcase-1.0"))
+    if (tonumber(minor) or 0) < 15 then
+        error(("the loaded library is MINOR %s; this check needs 15 (deploy this checkout), then Retry"):format(tostring(minor)), 0)
+    end
+    R15Style("4")
+    local view = tostring(GetCVar("cameraView"))
+    if view ~= "2" and view ~= "3" then
+        error(("on view %s: type /run SetView(2), then Retry (views 4 and 5 may be written ones that don't follow)"):format(view), 0)
+    end
+    local line = ("MINOR %s, %s, on cameraView %s, SaveView hook %s"):format(tostring(minor),
+        STYLE_NAMES[tostring(GetCVar("cameraSmoothStyle"))], view, tostring(R15.saves ~= nil))
+    say("== r15check " .. line)
+    return true, line
+end
+
+local function R15Open(castAware)
+    R15.view, R15.zoom, R15.endedAt, R15.cast, R15.armed = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom()), nil, nil, castAware
+    R15.savesAt = R15.saves
+    SC.opts.castAware = castAware
+    local ok, err = pcall(OpenOrThrow)
+    if not ok then
+        SC.opts.castAware, R15.armed = false, nil
+        error(err, 0)
+    end
+    local line = ("%s: presenting from cameraView %s, zoom %s"):format(castAware and "castAware" or "plain", R15.view, tostring(R15.zoom))
+    say("== r15check " .. line)
+    return true, line
+end
+
+local r15Cast = CreateFrame("Frame")
+Probe:RegisterEvents(r15Cast, { "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" })
+r15Cast:SetScript("OnEvent", function(_, _, unit)
+    if unit ~= "player" or not R15.armed or R15.cast then return end
+    C_Timer.After(0, function()
+        R15.cast = { mode = tostring(lib().state.cam.mode), view = tostring(GetCVar("cameraView")) }
+    end)
+end)
+
+local function R15CastSeen()
+    if not SC:IsActive() then return R15Observe("cast", false, "the presentation ended before a cast") end
+    if not R15.cast then return false, "waiting for a cast" end
+    return R15Observe("cast", R15.cast.mode == "castReset",
+        ("a cast: mode %s, cameraView %s (want castReset)"):format(R15.cast.mode, R15.cast.view))
+end
+
+-- The exit's result, 2 s after the presentation ended.
+local function R15Exited(key, wantSaves)
+    return function()
+        if SC:IsActive() or SC:IsOwner() then return false, "the presentation is still ending" end
+        SC.opts.castAware, R15.armed = false, nil
+        if not R15.endedAt then R15.endedAt = GetTime() end
+        if GetTime() - R15.endedAt < 2 then return false, "settling" end
+        local view, zoom = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom())
+        local saves = R15.saves - (R15.savesAt or R15.saves)
+        local zoomOK = zoom ~= nil and R15.zoom ~= nil and math.abs(zoom - R15.zoom) < 0.1
+        R15Saved().want = R15.view
+        return R15Observe(key, view == R15.view and zoomOK and saves == wantSaves,
+            ("ended on cameraView %s (want %s), zoom %s (at Open %s), SaveView calls %d (want %d)%s"):format(view,
+                R15.view, tostring(zoom), tostring(R15.zoom), saves, wantSaves,
+                saves > 0 and (", last into " .. tostring(R15.lastSave)) or ""))
+    end
+end
+
+local function R15Read()
+    local want = R15Saved().want
+    local view = tostring(GetCVar("cameraView"))
+    return R15Observe("reload", want ~= nil and view == want, ("after the /reload: cameraView %s (want %s)"):format(view,
+        tostring(want or "missing: no trial in this run")), "== ")
+end
+
+-- A consumer's own presentation: SaveView counted from Arm to the reading.
+local function R15ArmConsumer()
+    R15.consumerAt = R15.saves
+    return "counting SaveView calls (" .. R15.saves .. " so far)"
+end
+local function R15ConsumerRead()
+    if not R15.consumerAt then return R15Observe("consumer", false, "not armed") end
+    local n = R15.saves - R15.consumerAt
+    return R15Observe("consumer", n == 0, ("SaveView calls during the consumer's presentation: %d (want 0)%s")
+        :format(n, n > 0 and (", last into " .. tostring(R15.lastSave)) or ""))
+end
+
+local function R15Disarm()
+    SC.opts.castAware, R15.armed = false, nil
+    if SC:IsActive() then
+        Close()
+        SC:Exit("r15check stopped")
+    end
+end
+local function R15Leave(outcome) if outcome == "stopped" then R15Disarm() end end
+local function R15LeaveExit(outcome) if outcome ~= "back" then R15Disarm() end end
+
+Probe:Steps("r15check", {
+    title = "The r15 release check: no view written on a style that follows (#75)",
+    { text = "Mouse and keyboard, out of combat, room to walk, Camera Following Style Only when moving, on view 2"
+        .. " or 3. You need a spell with a cast time on a key. Three parts. 1) A castAware presentation: watch"
+        .. " for a short swing when you cast, then Close should put the camera back where it was before Open, at"
+        .. " your zoom, and it should follow, also after a /reload. 2) Portal Roulette, used normally (open the"
+        .. " wheel, cast a teleport or portal). 3) The same on Never adjust camera. Every follow question is the"
+        .. " same test: " .. SV_ASK },
+    { text = "Checking the library, the style and the view.", auto = true, run = R15Start },
+    -- Part 1: castAware on a following style.
+    { text = "Open starts a presentation with castAware on.", button = "Open", run = function() return R15Open(true) end,
+      leave = R15Leave },
+    { text = "Let it settle, then cast the spell (let it run a second; jumping cancels it). Watch for a short"
+        .. " swing. Don't press Escape.", timeout = 120, wait = R15CastSeen, check = R15Check("cast"), leave = R15Leave },
+    { text = "Let the cast end, then Close.", button = "Close", run = Close, leave = R15Leave },
+    { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20,
+      wait = R15Exited("exit", 0), check = R15Check("exit"), leave = R15LeaveExit },
+    { text = "Did the camera end where it was before Open, at your zoom? (Anything else: the Note box.)", ask = true },
+    { text = "After the presentation: " .. SV_ASK, ask = true },
+    { text = "Type /reload: does it last?", reload = true },
+    { text = "Reading the view after the /reload.", auto = true, run = R15Read, check = R15Check("reload") },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    -- Part 2: a consumer's own presentation (the library in this probe is the newest copy, so it runs).
+    { text = "Arm starts counting SaveView calls. Then open Portal Roulette's wheel and cast a teleport or portal"
+        .. " as you normally would (no Portal Roulette on this character: Skip this and the next three).",
+      button = "Arm", run = R15ArmConsumer },
+    { text = "After the cast and the loading screen: Done reads the count.", button = "Done", run = R15ConsumerRead,
+      check = R15Check("consumer") },
+    { text = "Did the wheel's camera look right during the cast? (Anything odd: the Note box.)", ask = true },
+    { text = "Where you arrived: " .. SV_ASK, ask = true },
+    -- Part 3: Never.
+    { text = "Set Camera Following Style to Never adjust camera (Options > Controls > Camera), then Open.",
+      button = "Open", run = function() R15Style("0"); return R15Open(false) end, leave = R15Leave },
+    { text = "Close ends it. Watch: the camera should snap back exactly where it was.", button = "Close", run = Close,
+      leave = R15Leave },
+    { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20,
+      wait = R15Exited("never", 1), check = R15Check("never"), leave = R15LeaveExit },
+    { text = "On Never: did the camera snap back exactly where it was before Open?", ask = true },
+    { text = "Set Camera Following Style back to Only when moving.", button = "Done",
+      run = function() R15Style("4"); return SVCall("SetView", 2) end },
+})
 
 ----------------------------------------------------------------------------
 -- Load

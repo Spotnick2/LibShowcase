@@ -1242,6 +1242,51 @@ S.Answer(false); S.Next()
 eq(rec.results[13].check, "FAIL", "view4 13: the saved setup skipped in this run: FAIL")
 check(tostring(rec.results[13].detail):find("set nil", 1, true), "  no setup recorded in this run")
 fp("steps stop")
+-- The r15 release check (#75): no view written on a following style.
+do
+    local errs10 = #errors
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    WoW.camera.zoom = 12
+    fp("steps ls r15check")
+    rec = record("r15check")
+    S.Next()
+    check(tostring(rec.results[2].detail):find("MINOR 15, Only when moving, on cameraView 3", 1, true), "r15check 2: the start read")
+    S.Run()
+    check(SC:IsActive() and SC.opts.castAware, "r15check 3: presenting, castAware on")
+    ticks(0.1, 20)
+    WoW.fire("UNIT_SPELLCAST_START", "player"); WoW.flushTimers(); S.Poll()
+    eq(rec.results[4].check, "PASS", "r15check 4: the cast took the reset swing")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player"); ticks(0.1, 5)
+    S.Run()   -- Close
+    untilEnded(); WoW.advance(3); S.Poll()
+    eq(rec.results[6].check, "PASS", "r15check 6: the exit on view 3 at the zoom of Open, no SaveView")
+    check(tostring(rec.results[6].detail):find("SaveView calls 0 (want 0)", 1, true), "  counted")
+    eq(SC.opts.castAware, false, "  castAware off again")
+    S.Answer(true); S.Answer(true)
+    S.Next()   -- the /reload
+    eq(rec.results[10].check, "PASS", "r15check 10: still view 3 after the /reload")
+    S.Answer(true)
+    -- Part 2: a consumer's presentation that saved a view would read FAIL.
+    S.Run()   -- Arm
+    SaveView(4)
+    S.Run()   -- Done
+    eq(rec.results[13].check, "FAIL", "r15check 13: a SaveView during the consumer's presentation: FAIL")
+    check(tostring(rec.results[13].detail):find("1 (want 0), last into 4", 1, true), "  saying which")
+    S.Answer(true); S.Answer(true)
+    -- Part 3: Never.
+    WoW.cvars.cameraSmoothStyle = "0"
+    S.Run()
+    check(SC:IsActive(), "r15check 16: presenting on Never")
+    S.Run()   -- Close
+    untilEnded(); WoW.advance(3); S.Poll()
+    eq(rec.results[18].check, "PASS", "r15check 18: Never: exactly one SaveView, the snap-back, cameraView back")
+    S.Answer(true)
+    WoW.cvars.cameraSmoothStyle = "4"
+    S.Run()
+    eq(rec.status, "done", "the r15check procedure finishes")
+    eq(WoW.cvars.cameraView, "2", "  on view 2")
+    eq(#errors - errs10, 0, "  no refusal")
+end
 -- Below MINOR 14: the start refuses.
 do
     local realGet = LibStub.GetLibrary
