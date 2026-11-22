@@ -39,6 +39,9 @@
 --   viewfix   three ways out of saved view 5, each from the exit's stuck state:
 --             ResetView(5), the cameraView CVar, SetView and the zoom: does
 --             the camera jump, follow, and still follow after a /reload (#51)?
+--   r12view   the r12 release check (#51): a real presentation's exit on Only
+--             when moving and on Always (the view, the settled zoom, following,
+--             after a /reload), the login repair, and view 3, the fallback
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -1922,6 +1925,142 @@ do
     steps[#steps + 1] = { text = "Cleaning up: ResetView(5), then SetView back to your own view.", auto = true,
         run = function() return SVCall("ResetView", 5, "SetView", VFView()) end }
     Probe:Steps("viewfix", steps)
+end
+
+-- 20. The r12 release check (#51). On a style that follows, r12 ends a
+-- presentation on the player's own view and puts the zoom back; at login it
+-- repairs, once per consumer db, a player found on the saved view. Measured
+-- with a real presentation (the probe's instance, savedViewSlot 5): the view
+-- the exit ends on, the zoom once settled, and whether the camera follows,
+-- before and after a /reload, on Only when moving and on Always. Then the
+-- repair, through the probe's own db (its flag cleared). Then view 3, the
+-- fallback when a consumer saves into view 2, by SetView alone: a SaveView(2)
+-- would overwrite the player's own view 2.
+local R12 = {}
+
+-- The trial's expected view, kept in the saved variables: a /reload
+-- recreates R12 (Codex, PR #64).
+local function R12Saved()
+    LibShowcaseProbeDB.r12 = type(LibShowcaseProbeDB.r12) == "table" and LibShowcaseProbeDB.r12 or {}
+    return LibShowcaseProbeDB.r12
+end
+
+local function R12Open(want)
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if style ~= want then
+        error(("Camera Following Style is %s (%s): set it to %s (Options > Controls > Camera), then Retry")
+            :format(style, STYLE_NAMES[style] or "?", STYLE_NAMES[want]), 0)
+    end
+    local v = tostring(GetCVar("cameraView"))
+    if v == "5" then error("on view 5: type /run SetView(2), then Retry", 0) end
+    R12.view, R12.zoom, R12.endedAt, R12.verdict = v, tonumber(GetCameraZoom()), nil, nil
+    R12Saved().view = v
+    OpenOrThrow()
+    local line = ("%s: presenting from cameraView %s, zoom %s"):format(STYLE_NAMES[want], v, tostring(R12.zoom))
+    say("== r12view " .. line)
+    return true, line
+end
+
+-- The exit's result, read 2 s after the presentation ended: the player's own
+-- view, and the zoom they had at Open.
+local function R12Settled()
+    if SC:IsActive() or SC:IsOwner() then return false, "the presentation is still ending" end
+    if not R12.endedAt then R12.endedAt = GetTime() end
+    if GetTime() - R12.endedAt < 2 then return false, "settling" end
+    local view, zoom = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom())
+    local viewOK = view == R12.view
+    local zoomOK = zoom ~= nil and R12.zoom ~= nil and math.abs(zoom - R12.zoom) < 0.1
+    local line = ("ended on cameraView %s (own %s), zoom %s (at Open %s)"):format(view, tostring(R12.view),
+        tostring(zoom), tostring(R12.zoom))
+    R12.verdict = { viewOK and zoomOK, line }
+    say("  r12view " .. line)
+    return true, line
+end
+
+local function R12Verdict()
+    local v = R12.verdict or { false, "not read" }
+    return v[1], v[2]
+end
+
+-- A missing expectation fails: nothing to compare with is not a pass.
+local function R12Read(tag, want)
+    local view = tostring(GetCVar("cameraView"))
+    R12.verdict = { want ~= nil and view == tostring(want), ("%s: cameraView %s (want %s)"):format(tag, view,
+        want ~= nil and tostring(want) or "missing: the trial's start wasn't saved") }
+    say("== r12view " .. R12.verdict[2])
+    return true, R12.verdict[2]
+end
+
+-- r10 and earlier left players on the saved view. The probe's own db's flag
+-- is cleared, so its instance repairs at the next login.
+local function R12Stuck()
+    local key = lib().VIEW_REPAIR_DB_KEY
+    if not key then
+        error("this library has no login repair (MINOR "
+            .. tostring(select(2, LibStub:GetLibrary("LibShowcase-1.0"))) .. ")", 0)
+    end
+    LibShowcaseProbeDB[key] = nil
+    return SVCall("SaveView", 5, "SetView", 5) .. "; this probe's repair flag cleared"
+end
+
+local function R12Repaired()
+    local key = lib().VIEW_REPAIR_DB_KEY
+    local view = tostring(GetCVar("cameraView"))
+    R12.verdict = { view == "2" and LibShowcaseProbeDB[key] == true,
+        ("after the login: cameraView %s (want 2), this probe's repair flag %s"):format(view, tostring(LibShowcaseProbeDB[key])) }
+    say("== r12view " .. R12.verdict[2])
+    return true, R12.verdict[2]
+end
+
+local function R12Exit(want)
+    local name = STYLE_NAMES[want]
+    return {
+        { text = ("Set Camera Following Style to %s, stand on your own view at your usual zoom, then Open starts a"
+            .. " presentation."):format(name), button = "Open", run = function() return R12Open(want) end },
+        { text = "Let it turn a moment, then Close ends it. Watch where the camera ends.", button = "Close", run = Close },
+        { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20, wait = R12Settled, check = R12Verdict },
+        { text = "Did the camera end behind the character, at the zoom you had before Open? (Anything else: the Note box.)", ask = true },
+        { text = ("On %s: %s"):format(name, SV_ASK), ask = true },
+        { text = "Type /reload: does it last?", reload = true },
+        { text = "Reading the view after the /reload.", auto = true,
+          run = function() return R12Read("reload on " .. name, R12Saved().view) end, check = R12Verdict },
+        { text = "After the /reload: " .. SV_ASK, ask = true },
+    }
+end
+
+do
+    local steps = {
+        title = "The r12 release check (#51)",
+        { text = "Mouse and keyboard, out of combat, room to walk. Three parts. 1) A presentation on Only when moving, then"
+            .. " on Always: each time, watch where the camera ends when it closes (it should be behind the character, at"
+            .. " the zoom you had), then whether it follows, then again after a /reload. The follow test throughout: "
+            .. SV_ASK .. " 2) The login repair: you get stuck on view 5 on purpose and a /reload should free you."
+            .. " 3) View 3: does it follow?" },
+    }
+    for _, want in ipairs({ "4", "2" }) do
+        for _, step in ipairs(R12Exit(want)) do steps[#steps + 1] = step end
+    end
+    local tail = {
+        -- The login repair.
+        { text = "Get stuck puts you on view 5 as r10 left players (SaveView(5), SetView(5)), and clears this probe's"
+            .. " repair flag so its next login repairs.", button = "Get stuck", run = R12Stuck },
+        { text = "Stuck (it shouldn't follow): " .. SV_ASK, ask = true },
+        { text = "Type /reload: the login repair should move you to view 2.", reload = true },
+        { text = "Reading the view and the flag.", auto = true, run = R12Repaired, check = R12Verdict },
+        { text = "After the repair: " .. SV_ASK, ask = true },
+        -- View 3, the fallback for a consumer that saves into view 2.
+        { text = "SetView(3): the view an exit ends on when a consumer saves into view 2 (AltStable's slot setting).",
+          button = "SetView(3)", run = function() return SVCall("SetView", 3) end },
+        { text = "On view 3: " .. SV_ASK, ask = true },
+        { text = "Type /reload: does it last?", reload = true },
+        { text = "Reading the view after the /reload.", auto = true,
+          run = function() return R12Read("reload on view 3", "3") end, check = R12Verdict },
+        { text = "After the /reload, on view 3: " .. SV_ASK, ask = true },
+        { text = "Back to view 2.", auto = true, run = function() return SVCall("SetView", 2) end },
+    }
+    for _, step in ipairs(tail) do steps[#steps + 1] = step end
+    Probe:Steps("r12view", steps)
 end
 
 ----------------------------------------------------------------------------

@@ -21,7 +21,7 @@
 --   dialog and brings the UI back instead. An intentional divergence: no
 --   scenario here shows a dialog; test_lease.lua covers the new behaviour.
 -- - The view an exit ends on (#51, MINOR 12). The block ended on the saved
---   view, where the camera stops following (MEASURED 70959+). Every scenario
+--   view, where the camera stops following (MEASURED 71037). Every scenario
 --   here runs on Camera Following Style Never (cameraSmoothStyle 0), where
 --   the library still snaps back to the saved view exactly as the block did;
 --   it then writes the cameraView CVar back to the player's own view, which
