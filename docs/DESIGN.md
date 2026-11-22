@@ -86,10 +86,14 @@ owner.
   saves their camera into `savedViewSlot` and switches to view 2. The exit depends on Camera
   Following Style (`cameraSmoothStyle`; the dropdown: 1 "Only horizontal when moving", 4 "Only when
   moving", the default, 2 "Always adjust camera", 0 "Never adjust camera"):
-  - **A style that follows (1, 2, 4):** the exit ends on the player's own view (2 when it was the
-    saved slot or isn't known) and puts the zoom back. The camera ends behind the character at the
+  - **A style that follows (1, 2, 4):** the exit ends on the player's own view and puts the zoom
+    back. When the own view was the saved slot or isn't known, the exit goes to a fallback instead:
+    view 2, or view 3 when `savedViewSlot` is 2. The camera ends behind the character at the
     player's zoom; their exact angle isn't kept. The restore at the end of the exit animation
-    doesn't set the view again (that would snap the zoom mid-animation).
+    doesn't set the view again (that would snap the zoom mid-animation), but only when this copy's
+    exit recorded that it put the view back (`cam.viewDone`). An exit an older copy started
+    (r10's goes to the saved slot), or one that began on Never, is finished on the own view
+    (Codex, PR #63).
   - **Never (0):** the exact snap-back to the saved view, as AltStable's block did, then the
     `cameraView` CVar written back to the player's own view, so the next login loads theirs.
   - **Why:** MEASURED 70959+ (`/fp steps ls savedview` and `viewfix`, runs #572 to #590,
@@ -103,10 +107,11 @@ owner.
     jump to view 2's framing. None of the 15 saved-view CVars (`cameraDistanceA..E`,
     `cameraPitchA..E`, `cameraYawA..E`) is readable through `GetCVar`. Style 1 isn't measured and
     is treated like 2 and 4. **Not measured yet:** whether the zoom put back after `SetView` lands
-    where it was (the read right after `SetView(2)` was view 2's own 5.55).
+    where it was (the read right after `SetView(2)` was view 2's own 5.55), and whether the view 3
+    fallback (`savedViewSlot` 2 only) follows: only view 2 was measured.
   - **The login repair:** r3 to r11 ended every presentation on the saved view, so their players
     are still there at every login. At `PLAYER_LOGIN` (or `New`, after login), once per consumer
-    db, on a style that follows: a player found on `savedViewSlot` goes back to view 2. The flag
+    db, on a style that follows: a player found on `savedViewSlot` goes to the fallback view. The flag
     is `db.LibShowcaseViewRepaired`. Not on Never (nothing follows there, and a later switch
     still gets the repair), not without a db, not while a presentation or another instance's
     lease holds the camera. A player who chose that view is moved once; on it, their camera

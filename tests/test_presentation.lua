@@ -553,6 +553,25 @@ do  -- Never: the exact snap-back, then cameraView written back.
     check(hasCall("SetCVar(cameraView, 3)"), "  written by SetCVar, not SetView")
 end
 
+do  -- Never at the exit's start, a following style at its end: the end of
+    -- the exit still puts the player's own view back (Codex, PR #63).
+    local lib, SC = present("0", "3")
+    SC:Exit("closed")
+    WoW.cvars.cameraSmoothStyle = "2"
+    ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "the style switched to a following one mid-exit: the exit ends on the own view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- savedViewSlot 2 (Codex, PR #63): the fallback is never the saved slot.
+    local lib, SC = present("4", "2", 2)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "savedViewSlot 2, entered on view 2: the exit ends on view 3")
+    lib, SC = present("4", "4", 2)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "4", "savedViewSlot 2, entered on view 4: the exit ends on view 4")
+end
+
 do  -- A consumer's own savedViewSlot.
     local lib, SC = present("4", "2", 3)
     SC:Exit("closed"); ticks(0.1, 6)
@@ -616,6 +635,15 @@ do  -- An instance created after login repairs at New.
     lib:New({ owner = "A", db = DB, savedViewSlot = 3 })
     eq(WoW.cvars.cameraView, "2", "New after login, on its own savedViewSlot 3: back to view 2")
     eq(DB.LibShowcaseViewRepaired, true, "  marked")
+end
+
+do  -- savedViewSlot 2: the repair goes to view 3, not the slot it leaves.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
+    local DB = {}
+    lib:New({ owner = "A", db = function() return DB end, savedViewSlot = 2 })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "3", "savedViewSlot 2, on view 2 at login: to view 3")
 end
 
 do  -- Not while another instance presents.

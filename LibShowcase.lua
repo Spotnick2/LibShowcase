@@ -1123,7 +1123,7 @@ function I.Enter(inst, anchor)
 
     cam.active, cam.mode, cam.elapsed = true, "enter", 0
     cam.inst, cam.cfg, cam.capture, cam.anchor = inst, cfg, capture, anchor
-    cam.didSalute, cam.presentationViewSaved = false, nil
+    cam.didSalute, cam.presentationViewSaved, cam.viewDone = false, nil, nil
     cam.castResetDuration, cam.resumeAfterReset = nil, nil
     cam.enterToZoom = I.TargetZoom(cfg)
 
@@ -1213,8 +1213,9 @@ function I.Exit(inst, reason)
     I.ShowUI()
     I.StopYaw()
     cam.mode, cam.elapsed = "exit", 0
-    -- The view back now; the rest is restored when the exit ends.
-    if cam.capture then I.ExitView(cam.capture) end
+    -- The view back now; the rest is restored when the exit ends. Recorded:
+    -- an older copy's exit (to the saved slot) leaves no mark (Codex, PR #63).
+    cam.viewDone = cam.capture and I.ExitView(cam.capture) or nil
     lib.animFrame:Show()
     I.Debug(inst, "exit start: " .. tostring(reason or "hide"))
     return true
@@ -1228,11 +1229,19 @@ function I.CameraFollows()
     return style ~= 0
 end
 
--- The view an exit ends on: the player's own (cameraView at Enter), or 2 when
--- that was the saved slot itself or isn't known (an older copy's capture).
+-- The view to go to instead of the saved slot: 2, or 3 when a consumer saves
+-- into 2 (savedViewSlot accepts 2-5; Codex, PR #63). Only the slot-5 case is
+-- MEASURED to follow (view 2).
+function I.FallbackView(slot)
+    return tonumber(slot) == 2 and 3 or 2
+end
+
+-- The view an exit ends on: the player's own (cameraView at Enter), or the
+-- fallback when that was the saved slot or isn't known (an older copy's
+-- capture).
 function I.OwnView(cap)
     local v = tonumber(cap.view)
-    if not v or v < 1 or v > 5 or v == cap.savedViewSlot then return 2 end
+    if not v or v < 1 or v > 5 or v == cap.savedViewSlot then return I.FallbackView(cap.savedViewSlot) end
     return math.floor(v)
 end
 
@@ -1246,25 +1255,28 @@ end
 -- leaves the camera where it is and takes effect at the next login.
 -- So on a style that follows, the exit ends on the player's own view; on
 -- Never, it keeps the exact snap-back to the saved view, and the cameraView
--- CVar is written back at the end (RestoreCapture).
+-- CVar is written back at the end (RestoreCapture). True when it put the
+-- player's own view and zoom back, so the end of the exit leaves them.
 function I.ExitView(cap)
-    if not cap.savedViewSlot or type(SetView) ~= "function" then return end
+    if not cap.savedViewSlot or type(SetView) ~= "function" then return false end
     if I.CameraFollows() then
         pcall(SetView, I.OwnView(cap))
         if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
-    else
-        pcall(SetView, cap.savedViewSlot)
+        return true
     end
+    pcall(SetView, cap.savedViewSlot)
+    return false
 end
 
 -- Put the camera and every CVar back as captured. Shared by every restore
 -- and by the login self-heal. A nil capture entry means the CVar did not
--- exist: writing a default over it would invent a setting. `viewDone`: an
--- exit already put the view back (ExitView); on a style that follows, a
--- second SetView would snap the zoom to the view's own again mid-animation.
+-- exist: writing a default over it would invent a setting. `viewDone`: this
+-- copy's ExitView already put the player's own view and zoom back (a second
+-- SetView would snap the zoom to the view's own mid-animation). Anything
+-- else, an older copy's exit to the saved slot included, isn't done.
 function I.RestoreCapture(cap, viewDone)
     local follows = I.CameraFollows()
-    if not (follows and viewDone) then
+    if not (follows and viewDone == true) then
         if cap.savedViewSlot and type(SetView) == "function" then
             pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)
         end
@@ -1309,7 +1321,7 @@ function I.Restore(inst, reason)
     I.StopYaw()
     lib.animFrame:Hide()
     if cam.capture then
-        I.RestoreCapture(cam.capture, cam.mode == "exit")
+        I.RestoreCapture(cam.capture, cam.mode == "exit" and cam.viewDone)
         local db = cam.inst and I.DB(cam.inst)
         if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end
     end
@@ -1318,6 +1330,7 @@ function I.Restore(inst, reason)
     cam.active, cam.mode, cam.capture, cam.elapsed = false, nil, nil, 0
     cam.inst, cam.cfg, cam.anchor = nil, nil, nil
     cam.presentationViewSaved, cam.castResetDuration, cam.resumeAfterReset = nil, nil, nil
+    cam.viewDone = nil
     -- The lifts stay while the UI is still hidden (a show owed after the
     -- lockdown, #42): PLAYER_REGEN_ENABLED drops them with it.
     if not st.uiHidden then I.DropAll() end
@@ -1483,7 +1496,8 @@ end
 -- #51: r3 to r11 ended every presentation on the saved view, where the camera
 -- doesn't follow, and the client loads cameraView at every login: a player
 -- who ever saw one is still there. Once per consumer db, at login, on a style
--- that follows: a player found on the saved view goes back to view 2. The
+-- that follows: a player found on the saved view goes back to view 2 (3 when
+-- the saved slot is 2). The
 -- camera has just been placed at login, so the move costs nothing. Not on
 -- Never (it follows nothing anyway), so a later switch to a following style
 -- still gets the repair. A player who chose that view is moved once.
@@ -1496,8 +1510,9 @@ function I.RepairView(inst)
     db[lib.VIEW_REPAIR_DB_KEY] = true
     local slot = I.Config(inst).savedViewSlot
     if tonumber(GetCVar("cameraView")) ~= slot then return false end
-    pcall(SetView, 2)
-    I.Debug(inst, "on the saved view " .. slot .. " at login: back to view 2 (#51)")
+    local to = I.FallbackView(slot)
+    pcall(SetView, to)
+    I.Debug(inst, ("on the saved view %d at login: back to view %d (#51)"):format(slot, to))
     return true
 end
 
