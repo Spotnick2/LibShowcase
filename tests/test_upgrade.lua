@@ -463,7 +463,7 @@ do
     eq(WoW.camera.zoom, 12, "  at the player's zoom")
 end
 
--- #66 (Codex, PR #68): an r12 castAware entry on view 4 that this copy takes
+-- #66 (Codex, PR #68), #72: an r12 castAware entry on view 4 that this copy takes
 -- over before it settles. r12's cam.cfg still names slot 4; the settle runs
 -- here and must not save into the view the exit ends on.
 do
@@ -486,8 +486,59 @@ do
     ticks(0.1, 5)
     SC:Exit("closed"); ticks(0.1, 6)
     check(not SC:IsActive(), "  the exit completes")
-    eq(WoW.cvars.cameraView, "4", "  on the player's own view 4")
-    eq(WoW.camera.savedViews[4], 7, "  with its own framing")
+    eq(WoW.cvars.cameraView, "2", "  on view 2: r12's capture gets castAware's slot from its cfg (#72)")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps its own framing")
+end
+
+-- #72: an r12 castAware presentation from view 4 already settled (r12 saved
+-- into 4) when this copy takes over: its exit still ends on view 2, the slot
+-- taken from r12's cam.cfg.
+do
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r12"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette", castAware = true })
+    check(SC:Enter(newWindow("MEDIUM")), "r12 presents castAware, from view 4")
+    ticks(0.1, 16)
+    check(hasCall("SaveView(4)"), "  r12 settled and saved into view 4")
+    loadCopy(copyOf(), "AltStable")
+    eq(old.state.cam.capture.presentationViewSlot, nil, "  r12's capture names no cast slot")
+    SC:Exit("closed")
+    eq(WoW.cvars.cameraView, "2", "  the exit goes to view 2 at once, not the view 4 r12 wrote")
+    ticks(0.1, 6)
+    check(not SC:IsActive(), "  the exit completes under the newer copy")
+    eq(WoW.cvars.cameraView, "2", "  on view 2")
+    -- A forced restore takes the same way.
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r12"), "PortalRoulette")
+    SC = old:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter(newWindow("MEDIUM")); ticks(0.1, 16)
+    loadCopy(copyOf(), "AltStable")
+    SC:ForceRestore("test")
+    eq(WoW.cvars.cameraView, "2", "  a forced restore under the newer copy: view 2 too")
+end
+
+-- #72 (Codex, PR #73): r12 already started the exit (SetView(4), viewDone)
+-- when this copy loads: the end of the exit corrects it to view 2, at the
+-- player's zoom.
+do
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r12"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette", castAware = true })
+    WoW.camera.zoom = 12
+    check(SC:Enter(newWindow("MEDIUM")), "r12 presents castAware, from view 4")
+    ticks(0.1, 16)
+    SC:Exit("closed")
+    eq(WoW.cvars.cameraView, "4", "  r12's exit went to view 4")
+    eq(old.state.cam.viewDone, true, "  and marked the view done")
+    loadCopy(copyOf(), "AltStable")
+    WoW.camera.zoom = 5   -- mid-animation
+    ticks(0.1, 6)
+    check(not SC:IsActive(), "  the exit completes under the newer copy")
+    eq(WoW.cvars.cameraView, "2", "  on view 2: the done mark no longer holds")
+    eq(WoW.camera.zoom, 12, "  at the player's zoom")
 end
 
 done("test_upgrade")

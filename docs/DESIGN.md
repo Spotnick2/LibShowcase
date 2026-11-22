@@ -58,7 +58,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
 | `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
 | `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51). The login repair reads it at `PLAYER_LOGIN`, or inside `New` for an instance created after login: a consumer with its own slot sets it in `inst.opts` before `PLAYER_LOGIN` (its `ADDON_LOADED`), or passes it to `New` (#67) |
-| `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot`, or to the view the exit ends on (the player's own or the fallback; MINOR 13, #66) |
+| `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot`, or to the player's own view or the view the exit ends on (MINOR 13, #66). With castAware the exit doesn't end on it: a written view stops following (MINOR 14, #72, MEASURED 71037). The exception: when the two slots are views 2 and 3 (either way round), they take both fallback views, so an exit that needs the fallback ends on the cast slot (never the saved slot), and nothing is saved into it then |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
 | `castAware` | false | PortalRoulette: a player cast returns to the settled view and holds still; its end resumes the orbit |
@@ -149,7 +149,28 @@ owner.
     so it also holds when this copy takes over an older copy's entry before it settles (the
     older `cam.cfg` still names the slot; Codex, PR #68). A view 4 an earlier copy already
     overwrote stays overwritten; the library has no way to read the old framing. Before r12 the
-    exit ended on the saved view, so view 4 was overwritten but never loaded.
+    exit ended on the saved view, so view 4 was overwritten but never loaded. The settle also
+    never saves into the player's own view, even when the exit goes elsewhere (#72).
+  - **With castAware, the exit doesn't end on its slot either** (MINOR 14, #72). MEASURED 71037
+    (SPOTNICK3, 2026-11-22, Only when moving, mouse and keyboard; the drag-and-walk test).
+    `/fp steps ls r13cast`, runs #601 and #602: with castAware from the player's own view 4, MINOR
+    13 kept view 4's framing, and the exit ended on view 4 at the zoom of Open, still view 4 after
+    a `/reload`, **but the camera didn't follow**, then or after the `/reload` (the procedure
+    had made view 4 with `SaveView(4)`). `/fp steps ls view4`, runs #604 to #606: view 2 (the
+    control) follows; view 4 at the client's default (`ResetView(4)`, `SetView(4)`) follows at
+    once but **not after a `/reload`**; view 4 saved from view 2 (`SetView(2)`, `SaveView(4)`,
+    `SetView(4)`: castAware's save, then the exit) **doesn't follow at once nor after a
+    `/reload`**. That is #51's symptom on view 4, which r10 to r12's castAware wrote at every
+    presentation. So with castAware, `Enter` records `presentationViewSlot` in the capture
+    (`capture.presentationViewSlot`, kept in the db for the crash heal), and `OwnView` treats it
+    like `savedViewSlot`: the exit ends on the fallback, view 2 (3 when the saved slot is 2; the
+    fallback also avoids the cast slot when it can). An older copy's capture lacks the key: it is
+    taken from that presentation's `cam.cfg` when this copy settles, exits or restores it. An exit the
+    older copy already started went to the cast slot and marked the view done: when the slot moves
+    the destination, the end of the exit sets the view and zoom again (Codex, PR #73).
+    Without castAware nothing writes view 4, so a player on it chose it, and the exit ends there.
+    Still open: castAware writes view 4 for players presenting from another view, so view 4
+    stops following for them if they pick it later.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

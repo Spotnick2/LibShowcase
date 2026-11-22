@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 13
+local MAJOR, MINOR = "LibShowcase-1.0", 14
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1115,6 +1115,9 @@ function I.Enter(inst, anchor)
     -- The player's own view, where the exit ends (#51). Read before SetView
     -- moves it.
     if type(GetCVar) == "function" then capture.view = tonumber(GetCVar("cameraView")) end
+    -- castAware writes this slot, and a written view stops following, so the
+    -- exit doesn't end there (#72). Kept in the capture for the crash heal.
+    if cfg.castAware and cfg.presentationViewSlot then capture.presentationViewSlot = cfg.presentationViewSlot end
     pcall(SaveView, capture.savedViewSlot)
     -- Crash self-heal: the capture lives in the consumer's SavedVariables
     -- until a restore clears it. Filled in as each CVar is changed.
@@ -1215,6 +1218,7 @@ function I.Exit(inst, reason)
     cam.mode, cam.elapsed = "exit", 0
     -- The view back now; the rest is restored when the exit ends. Recorded:
     -- an older copy's exit (to the saved slot) leaves no mark (Codex, PR #63).
+    I.NoteCastSlot(cam)
     cam.viewDone = cam.capture and I.ExitView(cam.capture) or nil
     lib.animFrame:Show()
     I.Debug(inst, "exit start: " .. tostring(reason or "hide"))
@@ -1230,19 +1234,41 @@ function I.CameraFollows()
 end
 
 -- The view to go to instead of the saved slot: 2, or 3 when a consumer saves
--- into 2 (savedViewSlot accepts 2-5; Codex, PR #63). Only the slot-5 case is
--- MEASURED to follow (view 2).
-function I.FallbackView(slot)
-    return tonumber(slot) == 2 and 3 or 2
+-- into 2 (savedViewSlot accepts 2-5; Codex, PR #63), and not castAware's
+-- slot either when it can be helped (#72). MEASURED 71037 to follow: view 2,
+-- and view 3 (r12view, runs #499 to #503).
+function I.FallbackView(slot, other)
+    slot, other = tonumber(slot), tonumber(other)
+    if slot ~= 2 and other ~= 2 then return 2 end
+    if slot ~= 3 and other ~= 3 then return 3 end
+    return slot == 2 and 3 or 2
 end
 
 -- The view an exit ends on: the player's own (cameraView at Enter), or the
--- fallback when that was the saved slot or isn't known (an older copy's
--- capture).
+-- fallback when that was the saved slot, castAware's slot (#72), or isn't
+-- known (an older copy's capture).
 function I.OwnView(cap)
     local v = tonumber(cap.view)
-    if not v or v < 1 or v > 5 or v == cap.savedViewSlot then return I.FallbackView(cap.savedViewSlot) end
+    local cast = tonumber(cap.presentationViewSlot)
+    if not v or v < 1 or v > 5 or v == cap.savedViewSlot or v == cast then
+        return I.FallbackView(cap.savedViewSlot, cast)
+    end
     return math.floor(v)
+end
+
+-- An older copy's capture (r13 and before) doesn't name castAware's slot: it
+-- is taken from that presentation's cam.cfg when this copy settles, exits or
+-- restores it (#72). True when that moves the view the exit ends on: an
+-- exit the older copy already started went to the cast slot, so its
+-- cam.viewDone no longer holds (Codex, PR #73).
+function I.NoteCastSlot(cam)
+    local cap, cfg = cam.capture, cam.cfg
+    if cap and cfg and cfg.castAware and cfg.presentationViewSlot and cap.presentationViewSlot == nil then
+        local before = I.OwnView(cap)
+        cap.presentationViewSlot = cfg.presentationViewSlot
+        return I.OwnView(cap) ~= before
+    end
+    return false
 end
 
 -- #51. MEASURED 71037 (/fp steps ls savedview and viewfix, runs #572 to
@@ -1321,7 +1347,8 @@ function I.Restore(inst, reason)
     I.StopYaw()
     lib.animFrame:Hide()
     if cam.capture then
-        I.RestoreCapture(cam.capture, cam.mode == "exit" and cam.viewDone)
+        local moved = I.NoteCastSlot(cam)
+        I.RestoreCapture(cam.capture, cam.mode == "exit" and cam.viewDone and not moved)
         local db = cam.inst and I.DB(cam.inst)
         if db and db[lib.DB_KEY] == cam.capture then db[lib.DB_KEY] = nil end
     end
@@ -1377,13 +1404,14 @@ end
 -- settled view is saved first so a cast can return to it.
 function I.Settle(cam)
     I.StopYaw()
+    I.NoteCastSlot(cam)
     local slot = cam.cfg.castAware and cam.cfg.presentationViewSlot
-    -- Never into the view the exit ends on (#66): the exit would load the
-    -- presentation's framing as the player's own (on Never, at the next
-    -- login). A cast then takes the reset swing. Checked here, at the save:
-    -- an older copy's entry this copy takes over settles with that copy's
-    -- cam.cfg (Codex, PR #68).
-    if slot and cam.capture and slot == I.OwnView(cam.capture) then
+    -- Never into the player's own view or the view the exit ends on (#66):
+    -- it would overwrite their framing, or load the presentation's as theirs.
+    -- A cast then takes the reset swing. Checked here, at the save: an older
+    -- copy's entry this copy takes over settles with that copy's cam.cfg
+    -- (Codex, PR #68).
+    if slot and cam.capture and (slot == tonumber(cam.capture.view) or slot == I.OwnView(cam.capture)) then
         cam.presentationViewSaved = false
         I.Debug(cam.inst, "castAware: the exit ends on the presentation slot " .. slot .. "; not saved")
     elseif slot then

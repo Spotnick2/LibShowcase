@@ -325,9 +325,11 @@ do
     check(not lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "not registered without castAware")
 end
 
--- #66: castAware never saves into the view the exit ends on. A player whose
--- own view is presentationViewSlot keeps its framing: a cast takes the reset
--- swing, and the exit loads their view 4, not the presentation.
+-- #66: castAware never saves into the player's own view or the view the exit
+-- ends on: a player whose own view is presentationViewSlot keeps its framing,
+-- and a cast takes the reset swing. #72: the exit doesn't end on castAware's
+-- slot either (a written view 4 stops following, MEASURED 71037, runs #601 to
+-- #606): it ends on the fallback, view 2.
 local function castAwareOn(style, view, opts)
     local lib = freshLibrary()
     WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, view
@@ -352,8 +354,9 @@ for _, style in ipairs({ "4", "0" }) do
     ticks(0.1, 5)
     SC:Exit("closed"); ticks(0.1, 6)
     check(not SC:IsActive(), "  the exit completes")
-    eq(WoW.cvars.cameraView, "4", "  the player ends on (or, on Never, logs in to) their own view 4")
-    eq(WoW.camera.savedViews[4], 7, "  with its own framing")
+    eq(WoW.cvars.cameraView, "2", "  the player ends on (or, on Never, logs in to) view 2, not castAware's slot (#72)")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps its own framing")
+    eq(lib.state.cam.capture, nil, "  restored")
 end
 
 do  -- Another own view: the settled view is saved in 4 as before.
@@ -364,14 +367,72 @@ do  -- Another own view: the settled view is saved in 4 as before.
     SC:ForceRestore()
 end
 
-do  -- The fallback counts too: on the saved view, the exit ends on view 2.
+do  -- castAware's slot 2: the fallback avoids it (#72), so it is saved.
     local lib, SC = castAwareOn("4", "5", { presentationViewSlot = 2 })
-    check(not hasCall("SaveView(2)"), "presentationViewSlot 2, own view the saved one: 2 is the fallback, not saved")
+    check(hasCall("SaveView(2)"), "presentationViewSlot 2, own view the saved one: saved in 2")
     SC:Exit("closed"); ticks(0.1, 6)
-    eq(WoW.cvars.cameraView, "2", "  the exit ends on view 2")
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3, not castAware's 2")
+    lib, SC = castAwareOn("4", "2", { presentationViewSlot = 2 })
+    check(not hasCall("SaveView(2)"), "presentationViewSlot 2, own view 2: not saved into it")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3")
     lib, SC = castAwareOn("4", "3", { presentationViewSlot = 2 })
     check(hasCall("SaveView(2)"), "presentationViewSlot 2, own view 3: saved in 2")
     SC:ForceRestore()
+end
+
+do  -- Saved slot 2 and castAware's 3: the fallback can't avoid both, so the
+    -- exit's view 3 isn't written (#66).
+    local lib, SC = castAwareOn("4", "2", { savedViewSlot = 2, presentationViewSlot = 3 })
+    check(not hasCall("SaveView(3)"), "savedViewSlot 2, presentationViewSlot 3, own view 2: not saved into the exit's view 3")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3, never the saved slot")
+    -- The other way round (Codex, PR #73): saved 3, castAware's 2.
+    lib, SC = castAwareOn("4", "3", { savedViewSlot = 3, presentationViewSlot = 2 })
+    check(not hasCall("SaveView(2)"), "savedViewSlot 3, presentationViewSlot 2, own view 3: not saved into the exit's view 2")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "2", "  the exit ends on view 2, never the saved slot")
+end
+
+do  -- #72: the capture in the db names castAware's slot, for the crash heal.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    local DB = {}
+    local SC = lib:New({ owner = "PortalRoulette", castAware = true, db = DB })
+    SC:Enter(); ticks(0.1, 3)
+    eq(DB.LibShowcaseCapture.presentationViewSlot, 4, "castAware: the db's capture names slot 4 from Enter")
+    -- The client dies mid-entry: the next login heals from the db.
+    local cap = DB.LibShowcaseCapture
+    lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
+    lib:New({ owner = "PortalRoulette", db = { LibShowcaseCapture = cap } })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "  healed onto view 2, not castAware's 4")
+end
+
+do  -- #72: without castAware, view 4 is the player's own choice: the exit ends on it.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    local SC = lib:New({ owner = "AltStable" })
+    SC:Enter(); ticks(0.1, 16)
+    eq(lib.state.cam.capture.presentationViewSlot, nil, "no castAware: the capture names no cast slot")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "4", "  the exit ends on the player's view 4")
+end
+
+do  -- #72: the crash heal reads the slot from the capture in the db.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
+    local DB = { LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, view = 4, presentationViewSlot = 4 } }
+    lib:New({ owner = "PortalRoulette", db = DB })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "a crash on castAware from view 4: healed onto view 2")
+    DB = { LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, view = 4 } }
+    lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "5"
+    lib:New({ owner = "AltStable", db = DB })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "4", "  without castAware's slot in the capture: onto the player's view 4")
 end
 
 do  -- Read at each Enter: the next presentation from another view saves again.
