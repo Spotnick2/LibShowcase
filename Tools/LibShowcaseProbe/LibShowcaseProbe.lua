@@ -1702,26 +1702,31 @@ local function SavedViews()
     return (#parts > 0 and table.concat(parts, "; ") or "every readable saved view at its default") .. tail
 end
 
+-- Any style but Never (0) follows while moving. The dropdown (the owner's
+-- screenshot, 2026-11-22; Blizzard_SettingsDefinitions_Frame/Controls.lua)
+-- lists 1 "Only horizontal when moving", 4 "Only when moving" (the client's
+-- default), 2 "Always adjust camera", 0 "Never adjust camera". Run #567 on 4
+-- read "no" on view 2 too, where run #572 on 2 read "yes": the style matters,
+-- so each read names it.
+local FOLLOWING_STYLES = { ["1"] = true, ["2"] = true, ["4"] = true }
+local STYLE_NAMES = { ["0"] = "Never adjust camera", ["1"] = "Only horizontal when moving",
+    ["2"] = "Always adjust camera", ["4"] = "Only when moving" }
+
 local function SVRead(tag)
-    local line = ("%s: cameraView %s, cameraSmoothStyle %s, GamePadEnable %s; %s"):format(tag,
-        tostring(GetCVar("cameraView")), tostring(GetCVar("cameraSmoothStyle")),
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    local line = ("%s: cameraView %s, cameraSmoothStyle %s (%s), GamePadEnable %s; %s"):format(tag,
+        tostring(GetCVar("cameraView")), style, STYLE_NAMES[style] or "?",
         tostring(GetCVar("GamePadEnable")), SavedViews())
     say("== savedview " .. line)
     return line
 end
 
--- Only a style that follows out of combat can show the bug: run #567 ran on
--- 4, the client's default, which the dropdown names "Only in combat" (the
--- owner, 70959+; Blizzard_SettingsDefinitions_Frame/Controls.lua lists 1, 4,
--- 2 and 0), so every answer was "no" whatever the view.
-local FOLLOWING_STYLES = { ["1"] = true, ["2"] = true }
-
 local function SVStart()
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local style = tostring(GetCVar("cameraSmoothStyle"))
     if not FOLLOWING_STYLES[style] then
-        error(("Camera Following Style is %s, which doesn't follow out of combat: set it to Always"
-            .. " (Options > Controls > Camera), then Retry"):format(style), 0)
+        error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
     end
     return SVRead("start")
 end
@@ -1743,7 +1748,7 @@ end
 Probe:Steps("savedview", {
     title = "Saved view 5 and a camera that stays put (#51)",
     { text = "Mouse and keyboard (no gamepad), out of combat, somewhere open with room to walk. Set Camera Following"
-        .. " Style to Always (Options > Controls > Camera; Only in combat never follows out of combat). Every question is the same test: " .. SV_ASK
+        .. " Style to the one to test (Options > Controls > Camera; not Never). Every question is the same test: " .. SV_ASK
         .. " Watch for that each time: a camera that stays where you left it is the bug. This resets your saved"
         .. " view 5 (the library has already overwritten it)." },
     { text = "Reading the view and the saved views.", auto = true, run = SVStart },
@@ -1792,8 +1797,8 @@ local function VFStart()
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local style = tostring(GetCVar("cameraSmoothStyle"))
     if not FOLLOWING_STYLES[style] then
-        error(("Camera Following Style is %s, which doesn't follow out of combat: set it to Always"
-            .. " (Options > Controls > Camera), then Retry"):format(style), 0)
+        error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
     end
     local v = tostring(GetCVar("cameraView"))
     if v == "5" then error("on view 5 already: the start needs your own view. Type /run SetView(2), then Retry", 0) end
@@ -1851,7 +1856,8 @@ end
 do
     local steps = {
         title = "The way out of saved view 5 (#51)",
-        { text = "Mouse and keyboard, Camera Following Style Always, out of combat, room to walk. Three candidates, each"
+        { text = "Mouse and keyboard, out of combat, room to walk, Camera Following Style the one to test (not Never). Three"
+            .. " candidates, each"
             .. " from the stuck state an exit leaves. For each one, watch two things: whether the camera JUMPS when you"
             .. " press its button (the best one leaves it exactly where it was), and whether it then follows: " .. SV_ASK },
         { text = "Reading the view (it must be your own, not 5).", auto = true, run = VFStart },

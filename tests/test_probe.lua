@@ -884,10 +884,10 @@ rec = record("savedview")
 S.Next()
 eq(rec.at, 2, "savedview 2: refused in gamepad mode")
 style2 = 0
-WoW.cvars.cameraSmoothStyle = "4"
+WoW.cvars.cameraSmoothStyle = "0"
 S.Run()
-eq(rec.at, 2, "savedview 2: refused on Only in combat (4)")
-check(logHas("Camera Following Style is 4, which doesn't follow out of combat"), "  saying why")
+eq(rec.at, 2, "savedview 2: refused on Never (0)")
+check(logHas("Camera Following Style is 0 (Never adjust camera), which never follows"), "  saying why")
 WoW.cvars.cameraSmoothStyle = "2"
 S.Run()
 local start = tostring(rec.results[2].detail)
@@ -928,7 +928,7 @@ eq(rec.status, "done", "the savedview procedure finishes")
 eq(WoW.camera.savedViews[5], nil, "  its cleanup reset saved view 5")
 eq(WoW.cvars.cameraView, "2", "  on view 2")
 expectedErrors = expectedErrors + (#errors - errs4)
-eq(#errors - errs4, 2, "  two refusals: gamepad mode, Only in combat")
+eq(#errors - errs4, 2, "  two refusals: gamepad mode, Never")
 WoW.cvars.cameraSmoothStyle = "4"
 rawset(_G, "C_CVar", hadCVar2)
 rawset(_G, "C_InputInterfaceStyle", nil)
