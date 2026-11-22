@@ -1332,12 +1332,36 @@ do
     S.Next()   -- the /reload
     eq(rec.results[10].check, "PASS", "r15check 10: still view 3 after the /reload")
     S.Answer(true)
-    -- Part 2: a consumer's presentation that saved a view would read FAIL.
+    -- Part 2: Portal Roulette's own castAware presentation, a cast in it.
+    local PR = LibStub("LibShowcase-1.0"):New({ owner = "PortalRoulette", castAware = true })
+    local function consumerCast(save)
+        check(PR:Enter(), "  Portal Roulette presents")
+        ticks(0.1, 20)
+        if save then SaveView(4) end
+        WoW.fire("UNIT_SPELLCAST_START", "player"); WoW.flushTimers()
+        WoW.fire("UNIT_SPELLCAST_STOP", "player"); ticks(0.1, 5)
+        PR:Exit("cast"); ticks(0.1, 6)
+    end
     S.Run()   -- Arm
-    SaveView(4)
+    consumerCast()
     S.Run()   -- Done
+    eq(rec.results[13].check, "PASS", "r15check 13: a cast in Portal Roulette's castAware presentation, no SaveView")
+    check(tostring(rec.results[13].detail):find("owner PortalRoulette, castAware true, mode castReset", 1, true), "  the cast seen there")
+    -- A SaveView during it: FAIL.
+    S.Back(); S.Back(); S.Run(); consumerCast(true); S.Run()
     eq(rec.results[13].check, "FAIL", "r15check 13: a SaveView during the consumer's presentation: FAIL")
     check(tostring(rec.results[13].detail):find("1 (want 0), last into 4", 1, true), "  saying which")
+    -- No cast seen (the wheel's cinematic camera off, say): zero saves pass nothing (Codex, PR #78).
+    S.Back(); S.Back(); S.Run(); S.Run()
+    eq(rec.results[13].check, "FAIL", "r15check 13: no cast seen: FAIL, not zero saves' PASS")
+    check(tostring(rec.results[13].detail):find("none seen", 1, true), "  saying so")
+    -- A cast outside any presentation: FAIL.
+    S.Back(); S.Back(); S.Run()
+    WoW.fire("UNIT_SPELLCAST_START", "player"); WoW.flushTimers()
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    S.Run()
+    eq(rec.results[13].check, "FAIL", "r15check 13: a cast outside a presentation: FAIL")
+    check(tostring(rec.results[13].detail):find("presenting false", 1, true), "  saying so")
     S.Answer(true); S.Answer(true)
     -- Part 3: Never.
     WoW.cvars.cameraSmoothStyle = "0"
@@ -1346,12 +1370,28 @@ do
     S.Run()   -- Close
     untilEnded(); WoW.advance(3); S.Poll()
     eq(rec.results[18].check, "PASS", "r15check 18: Never: exactly one SaveView, the snap-back, cameraView back")
+    -- Back to Open, reopened, Done before the new exit is read: the earlier
+    -- pass doesn't carry over (Codex, PR #78).
+    S.Back(); S.Back(); S.Back()
+    eq(rec.at, 16, "  back on Open")
+    S.Run(); S.Run()   -- Open, Close
+    S.DoneByHand()
+    eq(rec.results[18].check, "FAIL", "r15check 18: reopened, Done before the read: FAIL, not the earlier PASS")
+    untilEnded()
+    -- A refused Open (the style), then skipped: the exit has nothing to score.
+    S.Back(); S.Back(); S.Back()
+    WoW.cvars.cameraSmoothStyle = "4"
+    S.Run()
+    eq(rec.at, 16, "  Open refused on a following style")
+    S.Skip(); S.Skip(); WoW.advance(3); S.Poll()
+    eq(rec.results[18].check, "FAIL", "r15check 18: Open refused, skipped: FAIL, no presentation opened")
+    check(tostring(rec.results[18].detail):find("no presentation opened in this attempt", 1, true), "  saying so")
     S.Answer(true)
     WoW.cvars.cameraSmoothStyle = "4"
     S.Run()
     eq(rec.status, "done", "the r15check procedure finishes")
     eq(WoW.cvars.cameraView, "2", "  on view 2")
-    eq(#errors - errs10, 0, "  no refusal")
+    eq(#errors - errs10, 1, "  one refusal, on purpose")
 end
 -- Below MINOR 14: the start refuses.
 do

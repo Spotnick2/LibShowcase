@@ -225,7 +225,12 @@ owner.
     was before Open and followed (yes), still view 2 after a `/reload` and following (yes). Portal
     Roulette used normally (the wheel, a teleport cast, under this copy as the newest): **no
     `SaveView`** between Arm and Done, and the camera followed where the player arrived (yes); the
-    cast's camera "unsure: nothing changed since the reload". Never: exactly one `SaveView` (into
+    cast's camera "unsure: nothing changed since the reload". That run counted saves only: it
+    didn't observe Portal Roulette's presentation or the cast inside it. The account's Portal
+    Roulette settings had its cinematic camera and castAware on (`cinematicCamera`,
+    `cameraCastAware` true in its SavedVariables), so it very likely ran castAware, but that isn't
+    measured. The procedure now requires the cast to be seen inside another addon's castAware
+    presentation (Codex, PR #78). Never: exactly one `SaveView` (into
     5), the snap-back exactly where it was (yes), view 2 and the zoom of Open. No error in Bugsy.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then

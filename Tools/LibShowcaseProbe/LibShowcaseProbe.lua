@@ -2517,7 +2517,14 @@ local function R15Start()
     return true, line
 end
 
-local function R15Open(castAware)
+-- Each Open starts its trial over: its observations and the /reload's
+-- expectation are cleared first, and its exit is scored only once this
+-- attempt opened (Codex, PR #78).
+local function R15Open(castAware, style)
+    local key = castAware and "exit" or "never"
+    R15.obs[key], R15.opened = nil, false
+    if castAware then R15.obs.cast, R15.obs.reload, R15Saved().want = nil, nil, nil end
+    if style then R15Style(style) end   -- a refusal leaves the attempt unopened
     R15.view, R15.zoom, R15.endedAt, R15.cast, R15.armed = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom()), nil, nil, castAware
     R15.savesAt = R15.saves
     SC.opts.castAware = castAware
@@ -2526,6 +2533,7 @@ local function R15Open(castAware)
         SC.opts.castAware, R15.armed = false, nil
         error(err, 0)
     end
+    R15.opened = true
     local line = ("%s: presenting from cameraView %s, zoom %s"):format(castAware and "castAware" or "plain", R15.view, tostring(R15.zoom))
     say("== r15check " .. line)
     return true, line
@@ -2534,10 +2542,20 @@ end
 local r15Cast = CreateFrame("Frame")
 Probe:RegisterEvents(r15Cast, { "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" })
 r15Cast:SetScript("OnEvent", function(_, _, unit)
-    if unit ~= "player" or not R15.armed or R15.cast then return end
-    C_Timer.After(0, function()
-        R15.cast = { mode = tostring(lib().state.cam.mode), view = tostring(GetCVar("cameraView")) }
-    end)
+    if unit ~= "player" then return end
+    if R15.armed and not R15.cast then
+        C_Timer.After(0, function()
+            R15.cast = { mode = tostring(lib().state.cam.mode), view = tostring(GetCVar("cameraView")) }
+        end)
+    end
+    -- The consumer part: whose presentation the cast landed in (Codex, PR #78).
+    if R15.consumerAt and not R15.consumerCast then
+        C_Timer.After(0, function()
+            local cam = lib().state.cam
+            R15.consumerCast = { active = cam.active == true, owner = tostring(cam.inst and cam.inst.owner),
+                castAware = cam.cfg and cam.cfg.castAware == true, mode = tostring(cam.mode) }
+        end)
+    end
 end)
 
 local function R15CastSeen()
@@ -2550,6 +2568,7 @@ end
 -- The exit's result, 2 s after the presentation ended.
 local function R15Exited(key, wantSaves)
     return function()
+        if not R15.opened then return R15Observe(key, false, "no presentation opened in this attempt") end
         if SC:IsActive() or SC:IsOwner() then return false, "the presentation is still ending" end
         SC.opts.castAware, R15.armed = false, nil
         if not R15.endedAt then R15.endedAt = GetTime() end
@@ -2573,15 +2592,26 @@ local function R15Read()
 end
 
 -- A consumer's own presentation: SaveView counted from Arm to the reading.
+-- A consumer's own presentation: SaveView counted from Arm to the reading,
+-- and the cast seen inside a castAware presentation of another addon. Zero
+-- saves alone pass nothing: Portal Roulette may have its cinematic camera
+-- or castAware off (Codex, PR #78).
 local function R15ArmConsumer()
-    R15.consumerAt = R15.saves
+    R15.consumerAt, R15.consumerCast, R15.obs.consumer = R15.saves, nil, nil
     return "counting SaveView calls (" .. R15.saves .. " so far)"
 end
 local function R15ConsumerRead()
     if not R15.consumerAt then return R15Observe("consumer", false, "not armed") end
     local n = R15.saves - R15.consumerAt
-    return R15Observe("consumer", n == 0, ("SaveView calls during the consumer's presentation: %d (want 0)%s")
-        :format(n, n > 0 and (", last into " .. tostring(R15.lastSave)) or ""))
+    local c = R15.consumerCast
+    R15.consumerAt = nil
+    local seen = c and c.active and c.owner ~= "LibShowcaseProbe" and c.castAware and c.mode == "castReset"
+    return R15Observe("consumer", n == 0 and seen and true or false,
+        ("SaveView calls during the consumer's presentation: %d (want 0)%s; the cast: %s"):format(n,
+            n > 0 and (", last into " .. tostring(R15.lastSave)) or "",
+            c and ("presenting %s, owner %s, castAware %s, mode %s (want a castAware presentation of"
+                .. " another addon, castReset)"):format(tostring(c.active), c.owner, tostring(c.castAware), c.mode)
+              or "none seen (want a cast inside the consumer's castAware presentation)"))
 end
 
 local function R15Disarm()
@@ -2617,8 +2647,8 @@ Probe:Steps("r15check", {
     { text = "Reading the view after the /reload.", auto = true, run = R15Read, check = R15Check("reload") },
     { text = "After the /reload: " .. SV_ASK, ask = true },
     -- Part 2: a consumer's own presentation (the library in this probe is the newest copy, so it runs).
-    { text = "Arm starts counting SaveView calls. Then open Portal Roulette's wheel and cast a teleport or portal"
-        .. " as you normally would (no Portal Roulette on this character: Skip this and the next three).",
+    { text = "Arm starts counting SaveView calls. Then open Portal Roulette's wheel (its Cinematic Camera and"
+        .. " Frame the character while casting on) and cast a teleport or portal as you normally would (no Portal Roulette on this character: Skip this and the next three).",
       button = "Arm", run = R15ArmConsumer },
     { text = "After the cast and the loading screen: Done reads the count.", button = "Done", run = R15ConsumerRead,
       check = R15Check("consumer") },
@@ -2626,7 +2656,7 @@ Probe:Steps("r15check", {
     { text = "Where you arrived: " .. SV_ASK, ask = true },
     -- Part 3: Never.
     { text = "Set Camera Following Style to Never adjust camera (Options > Controls > Camera), then Open.",
-      button = "Open", run = function() R15Style("0"); return R15Open(false) end, leave = R15Leave },
+      button = "Open", run = function() return R15Open(false, "0") end, leave = R15Leave },
     { text = "Close ends it. Watch: the camera should snap back exactly where it was.", button = "Close", run = Close,
       leave = R15Leave },
     { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20,
