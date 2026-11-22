@@ -33,6 +33,9 @@
 --             again, and after a /reload (#51)?
 --   tempcvar  the library's SetCVar over the gamepad's temp values on the
 --             centring CVars: what does each layer read, and what is left (#51)?
+--   savedview saved view 5 on mouse and keyboard: the reporter's ResetView(5),
+--             the library's SaveView/SetView calls, each across a /reload:
+--             does the camera swing back behind a walking character (#51)?
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -1643,6 +1646,116 @@ Probe:Steps("rereg", {
     { text = "Type /console test_cameraOverShoulder 0.5 once more. Did the popup appear? (Click Disable if it did.)", ask = true },
     { text = "Putting the CVar back.", auto = true, run = RestoreAll },
     { text = "Type /reload: it clears the handler this procedure registered.", reload = true },
+})
+
+-- 18. #51, saved view 5. The reporter (keyboard, no other camera addon, r4)
+-- fixes the camera with /run ResetView(5), and the bug is back at every login
+-- and /reload. Enter's SaveView(5) and Exit's SetView(5) leave a player on
+-- saved view 5, and the client keeps cameraView "5" and that view's
+-- cameraDistanceE / cameraPitchE in config-cache.wtf (both of the owner's
+-- accounts, 2026-11-22). The follow and view runs asked about turning with
+-- A/D, which turns the camera with the character whatever the view; the
+-- reporter's symptom is a camera that stays where the mouse left it, so each
+-- question here tests exactly that. One call per step, the views read after.
+local VIEW_LETTERS = { "A", "B", "C", "D", "E" }
+local SV_ASK = "Drag the camera to one side with the left mouse button, let go, then walk straight forward with W"
+    .. " for a few seconds (no mouse, no turning). Does the camera swing back behind the character on its own?"
+
+local function CVarDefault(name)
+    local c = G("C_CVar")
+    if type(c) ~= "table" or type(c.GetCVarDefault) ~= "function" then return nil end
+    local ok, d = pcall(c.GetCVarDefault, name)
+    return ok and d or nil
+end
+
+local function SameValue(a, b)
+    if tonumber(a) and tonumber(b) then return math.abs(tonumber(a) - tonumber(b)) < 0.0005 end
+    return tostring(a) == tostring(b)
+end
+
+-- Every saved view's distance, pitch and yaw that differs from its default
+-- (cameraDistanceA..E, cameraPitchA..E, cameraYawA..E; views 1 to 5).
+local function SavedViews()
+    local parts = {}
+    for i, letter in ipairs(VIEW_LETTERS) do
+        local view = {}
+        for _, what in ipairs({ "Distance", "Pitch", "Yaw" }) do
+            local name = "camera" .. what .. letter
+            local ok, v = pcall(GetCVar, name)
+            if ok and v ~= nil then
+                local d = CVarDefault(name)
+                if d == nil or not SameValue(v, d) then
+                    view[#view + 1] = ("%s %s (default %s)"):format(what:lower(), tostring(v), tostring(d))
+                end
+            end
+        end
+        if #view > 0 then parts[#parts + 1] = ("view %d: %s"):format(i, table.concat(view, ", ")) end
+    end
+    return #parts > 0 and table.concat(parts, "; ") or "every saved view at its default"
+end
+
+local function SVRead(tag)
+    local line = ("%s: cameraView %s, cameraSmoothStyle %s, GamePadEnable %s; %s"):format(tag,
+        tostring(GetCVar("cameraView")), tostring(GetCVar("cameraSmoothStyle")),
+        tostring(GetCVar("GamePadEnable")), SavedViews())
+    say("== savedview " .. line)
+    return line
+end
+
+local function SVStart()
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    return SVRead("start")
+end
+
+-- Each call in turn (a name and its view number), then the views read.
+local function SVCall(...)
+    local calls, n = {}, select("#", ...)
+    for i = 1, n, 2 do
+        local name, slot = select(i, ...)
+        local f = G(name)
+        if type(f) ~= "function" then error(name .. " is missing", 0) end
+        local ok, err = pcall(f, slot)
+        if not ok then error(("%s(%d) failed: %s. Retry"):format(name, slot, tostring(err)), 0) end
+        calls[#calls + 1] = ("%s(%d)"):format(name, slot)
+    end
+    return SVRead("after " .. table.concat(calls, ", "))
+end
+
+Probe:Steps("savedview", {
+    title = "Saved view 5 and a camera that stays put (#51)",
+    { text = "Mouse and keyboard (no gamepad), out of combat, somewhere open with room to walk. Camera Following Style"
+        .. " must not be Never: write which it is in the Note box. Every question is the same test: " .. SV_ASK
+        .. " Watch for that each time: a camera that stays where you left it is the bug. This resets your saved"
+        .. " view 5 (the library has already overwritten it)." },
+    { text = "Reading the view and the saved views.", auto = true, run = SVStart },
+    { text = "As it is now: " .. SV_ASK, ask = true },
+    -- The reporter's fix, and whether it lasts.
+    { text = "ResetView(5) is the reporter's fix.", button = "ResetView(5)", run = function() return SVCall("ResetView", 5) end },
+    { text = "After ResetView(5): " .. SV_ASK, ask = true },
+    { text = "Type /reload: does the fix last?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload after ResetView(5)") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    -- The library's view calls, from a player who never ran a presentation.
+    { text = "SetView(2) puts you on the default view, where a player starts who never ran a presentation.",
+      button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+    { text = "On view 2: " .. SV_ASK, ask = true },
+    { text = "Walk a little so the camera is behind you. Enter's view calls: SaveView(5), then SetView(2) (no zoom or turn here).",
+      button = "Enter's calls", run = function() return SVCall("SaveView", 5, "SetView", 2) end },
+    { text = "After Enter's calls: " .. SV_ASK, ask = true },
+    { text = "The exit ends on SetView(5).", button = "SetView(5)", run = function() return SVCall("SetView", 5) end },
+    { text = "After the exit's SetView(5): " .. SV_ASK, ask = true },
+    { text = "Type /reload, as a player's next login or /reload.", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload on view 5") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    -- A candidate fix: back on the player's own view, saved view 5 left as is.
+    { text = "SetView(2) goes back to the view the player started on, and leaves saved view 5 as the exit left it.",
+      button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+    { text = "Back on view 2: " .. SV_ASK, ask = true },
+    { text = "Type /reload: does that last?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload on view 2") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    { text = "Cleaning up: ResetView(5) clears the saved view this test wrote; you stay on view 2.", auto = true,
+      run = function() return SVCall("ResetView", 5) end },
 })
 
 ----------------------------------------------------------------------------

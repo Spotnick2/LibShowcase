@@ -868,6 +868,65 @@ eq(rec.status, "done", "an orbitspeed run with both turns skipped")
 check(tostring(rec.results[5].detail):find("not measured: both turns must be timed in this run", 1, true),
       "  is not measured, whatever an earlier run timed")
 
+-- #51, saved view 5: the reporter's ResetView(5), then the library's view
+-- calls, each read back with the saved views that differ from their default.
+-- ResetView, SaveView, SetView and C_CVar.GetCVarDefault are in the 70959 dump.
+local hadCVar2 = rawget(_G, "C_CVar")
+local defaults = { cameraView = "2", cameraDistanceE = "15", cameraPitchE = "10", cameraDistanceD = "15" }
+rawset(_G, "C_CVar", { GetCVarDefault = function(name) return defaults[name] end })
+WoW.cvars.cameraView, WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE = "5", "8.979999", "10.000000"
+WoW.cvars.cameraDistanceD = "15"
+local errs4 = #errors
+local style2 = 1
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return style2 end })
+fp("steps ls savedview")
+rec = record("savedview")
+S.Next()
+eq(rec.at, 2, "savedview 2: refused in gamepad mode")
+style2 = 0
+S.Run()
+local start = tostring(rec.results[2].detail)
+check(start:find("start: cameraView 5", 1, true), "savedview 2: the view read")
+check(start:find("view 5: distance 8.979999 (default 15)", 1, true), "  and saved view 5's non-default distance")
+check(not start:find("pitch", 1, true) and not start:find("view 4", 1, true), "  only what differs from the default")
+S.Answer(false)
+WoW.camera.savedViews[5] = 12
+S.Run()
+eq(WoW.camera.savedViews[5], nil, "savedview 4: ResetView(5)")
+check(tostring(rec.results[4].detail):find("after ResetView(5): cameraView 5", 1, true), "  read back")
+S.Answer(true)
+S.Next()   -- the /reload
+check(tostring(rec.results[7].detail):find("reload after ResetView(5): ", 1, true), "savedview 7: read after the /reload")
+S.Answer(false)
+S.Run()
+eq(WoW.cvars.cameraView, "2", "savedview 9: SetView(2)")
+S.Answer(true)
+local from = #WoW.calls
+S.Run()
+eq(WoW.calls[from + 1], "SaveView(5)", "savedview 11: Enter's SaveView(5)")
+eq(WoW.calls[from + 2], "SetView(2)", "  then SetView(2)")
+check(tostring(rec.results[11].detail):find("after SaveView(5), SetView(2):", 1, true), "  both named")
+S.Answer(true)
+S.Run()
+eq(WoW.cvars.cameraView, "5", "savedview 13: the exit's SetView(5)")
+S.Answer(false)
+S.Next()
+check(tostring(rec.results[16].detail):find("reload on view 5: cameraView 5", 1, true), "savedview 16: read after the /reload")
+S.Answer(false)
+S.Run()
+eq(WoW.cvars.cameraView, "2", "savedview 18: back on view 2")
+S.Answer(true)
+S.Next()
+S.Answer(true)
+eq(rec.status, "done", "the savedview procedure finishes")
+eq(WoW.camera.savedViews[5], nil, "  its cleanup reset saved view 5")
+eq(WoW.cvars.cameraView, "2", "  on view 2")
+expectedErrors = expectedErrors + (#errors - errs4)
+eq(#errors - errs4, 1, "  one refusal, gamepad mode")
+rawset(_G, "C_CVar", hadCVar2)
+rawset(_G, "C_InputInterfaceStyle", nil)
+WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE, WoW.cvars.cameraDistanceD = nil, nil, nil
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
