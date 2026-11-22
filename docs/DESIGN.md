@@ -171,6 +171,14 @@ owner.
     Without castAware nothing writes view 4, so a player on it chose it, and the exit ends there.
     Still open: castAware writes view 4 for players presenting from another view, so view 4
     stops following for them if they pick it later.
+  - **The r14 release check, MEASURED 71037** (`/fp steps ls castview`, runs #608 and #609,
+    SPOTNICK3, 2026-11-22, Only when moving, mouse and keyboard, MINOR 14 at `main` 29c3c53). The
+    tester made a view 4 facing the character (`SaveView(4)`, `SetView(4)`) and presented from it
+    with castAware: the settle saved nothing into view 4, a cast took the reset swing (from view
+    2), and Close ended on view 2 at the zoom of Open (5.55 -> 5.55). Asked: the camera ended
+    behind the character, not on the front view 4 (yes), and it followed (yes), still view 2 after
+    a `/reload` and following (yes). A note typed on the Close step, before Close: "not completely
+    behind" (the presentation's settled angle, before the exit). No error in Bugsy.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

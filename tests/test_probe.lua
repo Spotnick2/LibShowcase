@@ -1088,6 +1088,178 @@ eq(rec.results[8].check, "FAIL", "r12view 8: no saved expectation: FAIL")
 check(tostring(rec.results[8].detail):find("want missing", 1, true), "  saying so")
 fp("steps stop")
 
+-- The r14 release check (#66, #72): castAware from the player's own view 4,
+-- a cast, Close: on view 2, nothing saved into view 4.
+local errs7 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+WoW.camera.zoom = 12
+fp("steps ls castview")
+rec = record("castview")
+S.Next()
+check(tostring(rec.results[2].detail):find("Only when moving, starting on cameraView 3", 1, true), "castview 2: the start read")
+eq(LibShowcaseProbeDB.r13.from, "3", "  the start's view saved")
+S.Run()
+eq(WoW.cvars.cameraView, "4", "castview 3: on the new view 4")
+local view4 = WoW.camera.savedViews[4]
+S.Run()
+check(SC:IsActive() and SC.opts.castAware == true, "castview 4: presenting, castAware on")
+local from = #WoW.calls
+ticks(0.1, 20); S.Poll()
+eq(rec.results[5].check, "PASS", "castview 5: settled, nothing saved into view 4")
+for i = from + 1, #WoW.calls do check(WoW.calls[i] ~= "SaveView(4)", "  no SaveView(4)") end
+S.Poll()
+eq(rec.at, 6, "castview 6: waiting for a cast")
+WoW.fire("UNIT_SPELLCAST_START", "player")
+WoW.flushTimers(); S.Poll()
+eq(rec.results[6].check, "PASS", "castview 6: the cast took the reset swing")
+check(tostring(rec.results[6].detail):find("mode castReset, cameraView 2", 1, true), "  from view 2")
+WoW.fire("UNIT_SPELLCAST_STOP", "player")
+S.Run()   -- Close
+untilEnded()
+WoW.advance(3); S.Poll()
+eq(rec.results[8].check, "PASS", "castview 8: the exit ended on view 2 at the zoom of Open")
+check(tostring(rec.results[8].detail):find("ended on cameraView 2 (want 2, not castAware's 4), zoom 12 (at Open 12)", 1, true), "  read")
+eq(SC.opts.castAware, false, "  castAware off again")
+eq(WoW.camera.savedViews[4], view4, "  view 4 untouched by the presentation")
+S.Answer(true); S.Answer(true)
+S.Next()   -- the /reload
+eq(rec.results[12].check, "PASS", "castview 12: still view 2 after the /reload")
+S.Answer(true)
+eq(rec.status, "done", "the castview procedure finishes")
+eq(WoW.cvars.cameraView, "3", "  back on the start's view")
+eq(WoW.camera.savedViews[4], nil, "  view 4 reset to the default")
+eq(#errors - errs7, 0, "  no refusal")
+-- Done by hand before a wait's read: its check fails, never another step's
+-- PASS (Codex, PR #71).
+local function castviewToOpen()
+    WoW.cvars.cameraView = "3"
+    fp("steps ls castview")
+    rec = record("castview")
+    S.Next(); S.Run(); S.Run()
+end
+castviewToOpen()
+ticks(0.1, 20); S.Poll()
+eq(rec.results[5].check, "PASS", "castview 5: settled")
+S.DoneByHand()   -- the cast step, without a cast
+eq(rec.results[6].check, "FAIL", "castview 6: Done before a cast: FAIL, not the settle's PASS")
+check(tostring(rec.results[6].checkDetail):find("cast: not observed", 1, true), "  saying so")
+S.Run()          -- Close
+S.DoneByHand()   -- the exit step, before its sample
+eq(rec.results[8].check, "FAIL", "castview 8: Done before the exit's read: FAIL")
+eq(SC.opts.castAware, false, "  leaving the exit wait by Done turns castAware off")
+fp("steps stop")   -- on the framing question
+untilEnded()
+check(not SC:IsActive(), "  the presentation ended")
+fp("ls show")
+check(not LibStub("LibShowcase-1.0").eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"),
+    "  Stop on the framing question after it: a later /fp ls show has no cast events")
+SC:ForceRestore("test")
+untilEnded()
+-- Close skipped, the exit wait timed out: the presentation closes there, so
+-- the framing question has no showcase left open (Codex, PR #71).
+castviewToOpen()
+ticks(0.1, 20); S.Poll()
+S.DoneByHand()   -- the cast
+S.Skip()         -- Close
+check(SC:IsActive(), "castview: Close skipped, still presenting")
+WoW.advance(21); S.Poll()
+eq(rec.results[8].status, "timeout", "castview 8: the exit wait times out")
+eq(SC.opts.castAware, false, "  castAware off")
+untilEnded()
+check(not SC:IsActive() and not SC:IsOwner(), "  the presentation closed, the lease given back")
+check(UIParent:IsShown(), "  the game UI shown")
+fp("steps stop")
+-- Stopped mid-trial: the presentation closes, castAware off; a later
+-- ordinary presentation isn't cast-aware (Codex, PR #71).
+castviewToOpen()
+check(SC:IsActive() and SC.opts.castAware, "castview: presenting, castAware on")
+fp("steps stop")
+eq(SC.opts.castAware, false, "  Stop: castAware off")
+untilEnded()
+check(not SC:IsActive(), "  the presentation closed")
+fp("ls show")
+check(SC:IsActive(), "  a later /fp ls show presents")
+check(not LibStub("LibShowcase-1.0").eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "  without cast events")
+SC:ForceRestore("test")
+untilEnded()
+-- A run with no trial: the /reload read has no expectation, even though an
+-- earlier run saved one (Codex, PR #71).
+WoW.cvars.cameraView = "2"
+fp("steps ls castview")
+rec = record("castview")
+S.Next(); S.Run()
+for _ = 1, 5 do S.Skip() end   -- Open, the settle, the cast, Close, the exit
+S.Answer(true); S.Answer(true)
+S.Next()   -- the /reload
+eq(rec.results[12].check, "FAIL", "castview 12: no trial in this run: FAIL, not an earlier run's PASS")
+check(tostring(rec.results[12].detail):find("want missing", 1, true), "  saying so")
+fp("steps stop")
+-- The end goes to view 2 when the start was view 4 (run #601).
+WoW.cvars.cameraView = "4"
+fp("steps ls castview")
+rec = record("castview")
+S.Next(); S.Run(); S.Run(); ticks(0.1, 20); S.Poll()
+WoW.fire("UNIT_SPELLCAST_START", "player"); WoW.flushTimers(); S.Poll()
+WoW.fire("UNIT_SPELLCAST_STOP", "player")
+S.Run(); untilEnded(); WoW.advance(3); S.Poll()
+S.Answer(true); S.Answer(false); S.Next(); S.Answer(false)
+eq(rec.status, "done", "castview from view 4 finishes")
+eq(WoW.cvars.cameraView, "2", "  on view 2, not back on view 4")
+
+-- Does view 4 follow (#66, after run #601).
+local errs8 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+fp("steps ls view4")
+rec = record("view4")
+S.Next()
+S.Run()
+eq(WoW.cvars.cameraView, "2", "view4 3: the control on view 2")
+S.Answer(true)
+S.Run()
+eq(WoW.camera.savedViews[4], nil, "view4 5: view 4 at its default")
+eq(WoW.cvars.cameraView, "4", "  on view 4")
+S.Answer(true); S.Next()
+eq(rec.results[8].check, "PASS", "view4 8: still view 4 after the /reload")
+S.Answer(true)
+S.Run()
+check(WoW.camera.savedViews[4] ~= nil and WoW.cvars.cameraView == "4", "view4 10: view 4 saved from view 2, on it")
+check(hasCall("SetView(2)") and hasCall("SaveView(4)"), "  SetView(2), SaveView(4), SetView(4)")
+S.Answer(false); S.Next()
+eq(rec.results[13].check, "PASS", "view4 13: still view 4 after the /reload")
+S.Answer(false)
+eq(rec.status, "done", "the view4 procedure finishes")
+eq(WoW.camera.savedViews[4], nil, "  view 4 reset")
+eq(WoW.cvars.cameraView, "2", "  back on view 2")
+eq(#errors - errs8, 0, "  no refusal")
+-- A second run with the saved setup skipped: its read can't borrow the
+-- first run's setup (Codex, PR #71).
+fp("steps ls view4")
+rec = record("view4")
+S.Next(); S.Run(); S.Answer(true)
+S.Run(); S.Answer(true); S.Next(); S.Answer(true)
+S.Skip()   -- the saved-view setup
+S.Answer(false); S.Next()
+eq(rec.results[13].check, "FAIL", "view4 13: the saved setup skipped in this run: FAIL")
+check(tostring(rec.results[13].detail):find("set nil", 1, true), "  no setup recorded in this run")
+fp("steps stop")
+-- Below MINOR 14: the start refuses.
+do
+    local realGet = LibStub.GetLibrary
+    LibStub.GetLibrary = function(self, major, silent)
+        local L, m = realGet(self, major, silent)
+        if major == "LibShowcase-1.0" then return L, 13 end
+        return L, m
+    end
+    fp("steps ls castview")
+    rec = record("castview")
+    S.Next()
+    eq(rec.at, 2, "castview 2: refused under MINOR 13")
+    check(logHas("the loaded library is MINOR 13; this check needs 14"), "  saying why")
+    LibStub.GetLibrary = realGet
+    expectedErrors = expectedErrors + (#errors - errs7)
+    fp("steps stop")
+end
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
