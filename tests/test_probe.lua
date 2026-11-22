@@ -1088,6 +1088,65 @@ eq(rec.results[8].check, "FAIL", "r12view 8: no saved expectation: FAIL")
 check(tostring(rec.results[8].detail):find("want missing", 1, true), "  saying so")
 fp("steps stop")
 
+-- The r13 release check (#66): castAware from the player's own view 4, a
+-- cast, Close: back on view 4, nothing saved into it.
+local errs7 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+WoW.camera.zoom = 12
+fp("steps ls r13cast")
+rec = record("r13cast")
+S.Next()
+check(tostring(rec.results[2].detail):find("Only when moving, starting on cameraView 3", 1, true), "r13cast 2: the start read")
+eq(LibShowcaseProbeDB.r13.from, "3", "  the start's view saved")
+S.Run()
+eq(WoW.cvars.cameraView, "4", "r13cast 3: on the new view 4")
+local view4 = WoW.camera.savedViews[4]
+S.Run()
+check(SC:IsActive() and SC.opts.castAware == true, "r13cast 4: presenting, castAware on")
+local from = #WoW.calls
+ticks(0.1, 20); S.Poll()
+eq(rec.results[5].check, "PASS", "r13cast 5: settled, nothing saved into view 4")
+for i = from + 1, #WoW.calls do check(WoW.calls[i] ~= "SaveView(4)", "  no SaveView(4)") end
+S.Poll()
+eq(rec.at, 6, "r13cast 6: waiting for a cast")
+WoW.fire("UNIT_SPELLCAST_START", "player")
+WoW.flushTimers(); S.Poll()
+eq(rec.results[6].check, "PASS", "r13cast 6: the cast took the reset swing")
+check(tostring(rec.results[6].detail):find("mode castReset, cameraView 2", 1, true), "  from view 2")
+WoW.fire("UNIT_SPELLCAST_STOP", "player")
+S.Run()   -- Close
+untilEnded()
+WoW.advance(3); S.Poll()
+eq(rec.results[8].check, "PASS", "r13cast 8: the exit ended on view 4 at the zoom of Open")
+check(tostring(rec.results[8].detail):find("ended on cameraView 4 (want 4), zoom 12 (at Open 12)", 1, true), "  read")
+eq(SC.opts.castAware, false, "  castAware off again")
+eq(WoW.camera.savedViews[4], view4, "  view 4 untouched by the presentation")
+S.Answer(true); S.Answer(true)
+S.Next()   -- the /reload
+eq(rec.results[12].check, "PASS", "r13cast 12: still view 4 after the /reload")
+S.Answer(true)
+eq(rec.status, "done", "the r13cast procedure finishes")
+eq(WoW.cvars.cameraView, "3", "  back on the start's view")
+eq(WoW.camera.savedViews[4], nil, "  view 4 reset to the default")
+eq(#errors - errs7, 0, "  no refusal")
+-- Under r12 (the bug): the start refuses, the check needs MINOR 13.
+do
+    local realGet = LibStub.GetLibrary
+    LibStub.GetLibrary = function(self, major, silent)
+        local L, m = realGet(self, major, silent)
+        if major == "LibShowcase-1.0" then return L, 12 end
+        return L, m
+    end
+    fp("steps ls r13cast")
+    rec = record("r13cast")
+    S.Next()
+    eq(rec.at, 2, "r13cast 2: refused under MINOR 12")
+    check(logHas("the loaded library is MINOR 12; this check needs 13"), "  saying why")
+    LibStub.GetLibrary = realGet
+    expectedErrors = expectedErrors + (#errors - errs7)
+    fp("steps stop")
+end
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
