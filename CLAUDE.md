@@ -12,16 +12,19 @@ takes PortalRoulette's `Camera/CameraMode.lua` extras as opt-in options.
 Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\` through
 `.pkgmeta` externals, and LibStub runs the newest copy loaded.
 
-**Status (2026-11-22): `r12` released** (MINOR 12, annotated tag on `2638a91`: the exit ends
+**Status (2026-11-22): `r14` released** (MINOR 14, annotated tag on `6ac0fca`: with castAware
+the exit doesn't end on its slot, view 4, which stops following once written, #72; castAware
+saves nothing into the player's own view, #66, MINOR 13, never tagged on its own; the login
+repair's slot timing documented, #67. r12 on `2638a91`: the exit ends
 on the player's own view so the camera follows again, and a once-only login repair, #51;
 Skyborne framing, #59, MINOR 11, never tagged on its own. r10 on `1e2d026`: combat lockdown,
 countdowns, orbit speed, female framing, combat start, gamepad mode, #42, #40, #39, #38, #21,
 #54; MINOR 5 to 9 were never tagged on their own. r4 on `195d714`, opt-in `hideWorldNames`,
 #14/#15; r3 on `283914d`; r1 and r2 were never tagged), public at
 github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones externals
-anonymously). MIT. Consumers (the `.pkgmeta` pin): **AltStable** (`tag: r10`), **PortalRoulette**
-(`tag: r10`) and **123** (`tag: r4`, `NEEDS_MINOR = 4`: it uses `hideWorldNames`; r12 is
-Spotnick2/123#64). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
+anonymously). MIT. Consumers (the `.pkgmeta` pin in their last release): **AltStable**
+(`tag: r10`; its `main` pins r12), **PortalRoulette** (`tag: r10`; its PR #40 moves to r14) and
+**123** (`tag: r4`, `NEEDS_MINOR = 4`: it uses `hideWorldNames`; r12 is Spotnick2/123#64). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
 requests here.
 
 ## Layout
