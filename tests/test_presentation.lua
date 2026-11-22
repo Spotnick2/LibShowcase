@@ -387,6 +387,11 @@ do  -- Saved slot 2 and castAware's 3: the fallback can't avoid both, so the
     check(not hasCall("SaveView(3)"), "savedViewSlot 2, presentationViewSlot 3, own view 2: not saved into the exit's view 3")
     SC:Exit("closed"); ticks(0.1, 6)
     eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3, never the saved slot")
+    -- The other way round (Codex, PR #73): saved 3, castAware's 2.
+    lib, SC = castAwareOn("4", "3", { savedViewSlot = 3, presentationViewSlot = 2 })
+    check(not hasCall("SaveView(2)"), "savedViewSlot 3, presentationViewSlot 2, own view 3: not saved into the exit's view 2")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "2", "  the exit ends on view 2, never the saved slot")
 end
 
 do  -- #72: the capture in the db names castAware's slot, for the crash heal.
