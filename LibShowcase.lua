@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 12
+local MAJOR, MINOR = "LibShowcase-1.0", 13
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1115,6 +1115,13 @@ function I.Enter(inst, anchor)
     -- The player's own view, where the exit ends (#51). Read before SetView
     -- moves it.
     if type(GetCVar) == "function" then capture.view = tonumber(GetCVar("cameraView")) end
+    -- castAware never saves into the view the exit ends on (#66): the exit
+    -- would load the presentation's framing as the player's own (on Never, at
+    -- the next login). A cast then takes the reset swing.
+    if cfg.presentationViewSlot and cfg.presentationViewSlot == I.OwnView(capture) then
+        cfg.presentationViewSlot = nil
+        if cfg.castAware then I.Debug(inst, "castAware: the player's own view is the presentation slot; not saved") end
+    end
     pcall(SaveView, capture.savedViewSlot)
     -- Crash self-heal: the capture lives in the consumer's SavedVariables
     -- until a restore clears it. Filled in as each CVar is changed.

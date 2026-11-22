@@ -325,6 +325,67 @@ do
     check(not lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "not registered without castAware")
 end
 
+-- #66: castAware never saves into the view the exit ends on. A player whose
+-- own view is presentationViewSlot keeps its framing: a cast takes the reset
+-- swing, and the exit loads their view 4, not the presentation.
+local function castAwareOn(style, view, opts)
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, view
+    WoW.camera.savedViews[4] = 7              -- the player's own view 4
+    opts = opts or {}
+    opts.owner, opts.castAware = "PortalRoulette", true
+    local SC = lib:New(opts)
+    WoW.camera.zoom = 12
+    SC:Enter()
+    ticks(0.1, 16)
+    return lib, SC
+end
+
+for _, style in ipairs({ "4", "0" }) do
+    local lib, SC = castAwareOn(style, "4")
+    check(not hasCall("SaveView(4)"), "style " .. style .. ", own view 4: the settled view is not saved into it")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps the player's framing")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(lib.state.cam.mode, "castReset", "  a cast takes the reset swing")
+    eq(WoW.camera.view, 2, "  from view 2, not view 4")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    ticks(0.1, 5)
+    SC:Exit("closed"); ticks(0.1, 6)
+    check(not SC:IsActive(), "  the exit completes")
+    eq(WoW.cvars.cameraView, "4", "  the player ends on (or, on Never, logs in to) their own view 4")
+    eq(WoW.camera.savedViews[4], 7, "  with its own framing")
+end
+
+do  -- Another own view: the settled view is saved in 4 as before.
+    local lib, SC = castAwareOn("4", "3")
+    check(hasCall("SaveView(4)"), "own view 3: the settled view is saved in slot 4")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(lib.state.cam.mode, "castHold", "  and a cast returns to it")
+    SC:ForceRestore()
+end
+
+do  -- The fallback counts too: on the saved view, the exit ends on view 2.
+    local lib, SC = castAwareOn("4", "5", { presentationViewSlot = 2 })
+    check(not hasCall("SaveView(2)"), "presentationViewSlot 2, own view the saved one: 2 is the fallback, not saved")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "2", "  the exit ends on view 2")
+    lib, SC = castAwareOn("4", "3", { presentationViewSlot = 2 })
+    check(hasCall("SaveView(2)"), "presentationViewSlot 2, own view 3: saved in 2")
+    SC:ForceRestore()
+end
+
+do  -- Read at each Enter: the next presentation from another view saves again.
+    local lib, SC = castAwareOn("4", "4")
+    SC:ForceRestore()
+    WoW.cvars.cameraView = "3"
+    local from = #WoW.calls
+    SC:Enter(); ticks(0.1, 16)
+    local saved = false
+    for _, c in ipairs(callsSince(from)) do if c == "SaveView(4)" then saved = true end end
+    check(saved, "the next Enter from view 3 saves the settled view in 4")
+    SC:ForceRestore()
+end
+
 ------------------------------------------------------------------------------
 -- Options: validated in New, clamped at Enter, live in inst.opts.
 ------------------------------------------------------------------------------

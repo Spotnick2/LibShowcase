@@ -58,7 +58,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
 | `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
 | `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51) |
-| `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot` |
+| `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot`, or to the view the exit ends on (the player's own or the fallback; MINOR 13, #66) |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
 | `castAware` | false | PortalRoulette: a player cast returns to the settled view and holds still; its end resumes the orbit |
@@ -124,6 +124,16 @@ owner.
     still gets the repair), not without a db, not while a presentation or another instance's
     lease holds the camera. A player who chose that view is moved once; on it, their camera
     didn't follow either.
+  - **castAware never saves into the view the exit ends on** (MINOR 13, #66; found by Codex on
+    PortalRoulette#40, reasoned from the code, not measured). castAware saves the settled
+    presentation into `presentationViewSlot` (4) with `SaveView`. When that is the view the exit
+    ends on (`OwnView`: the player's own, or the fallback), r12's exit would load the
+    presentation's framing as theirs, and the client keeps `cameraView`, so every later login
+    too (on Never, the `cameraView` written back does the same at the next login). So `Enter`
+    drops the slot for that presentation (read at each `Enter`): nothing is saved, and a cast
+    takes the reset swing from view 2 instead of returning to a saved view. A view 4 an earlier
+    copy already overwrote stays overwritten; the library has no way to read the old framing.
+    Before r12 the exit ended on the saved view, so view 4 was overwritten but never loaded.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

@@ -117,6 +117,10 @@ local M = {
     { "pitchlimit not restored", { { '    if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end\n', "" } } },
     { "castAware hears every unit", { { '        if unit ~= "player" then return end\n', "" } } },
     { "the cast view not saved", { { "        cam.presentationViewSaved = pcall(SaveView, cam.cfg.presentationViewSlot) and true or false\n", "" } } },
+    -- #66
+    { "castAware saves into the own view", { { "        cfg.presentationViewSlot = nil\n", "" } } },
+    { "castAware skips only the own view, not the fallback", {
+        { "cfg.presentationViewSlot == I.OwnView(capture)", "cfg.presentationViewSlot == capture.view" } } },
     -- Review fixes (#4)
     { "a hidden UI does not lift the anchor", {
         { "        if anchor then I.Lift(inst, anchor, strata) end\n        return true\n", "        return true\n" } } },
