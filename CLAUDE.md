@@ -107,7 +107,7 @@ consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\WoW\Lib
 `pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
 `pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
 whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
-(r3: #10; r4: #16; r10: #60; r12: #65), and publish a GitHub Release for the tag (#13):
+(r3: #10; r4: #16; r10: #60; r12: #65; r14: #74), and publish a GitHub Release for the tag (#13):
 `gh release create rN --verify-tag --latest --title "rN: <what changed>" --notes-file <notes>`.
 The notes are written by hand, not generated: **the MINOR** first, what changed, whether a
 consumer must do anything (nothing / pin `tag: rN` **and raise its `NEEDS_MINOR`** to use what is
