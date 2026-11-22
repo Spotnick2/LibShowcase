@@ -1245,7 +1245,7 @@ function I.OwnView(cap)
     return math.floor(v)
 end
 
--- #51. MEASURED 70959+ (/fp steps ls savedview and viewfix, runs #572 to
+-- #51. MEASURED 71037 (/fp steps ls savedview and viewfix, runs #572 to
 -- #590, on Always and on Only when moving): the camera follows on view 2,
 -- also after SaveView(5); SetView(5) onto the saved view stops it, and the
 -- client keeps cameraView, so every later login loads view 5 and it stays

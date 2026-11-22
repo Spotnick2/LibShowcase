@@ -1022,7 +1022,10 @@ S.Next()
 S.Run()
 eq(rec.at, 2, "r12view 2: refused on Always where Only when moving is asked")
 check(logHas("Camera Following Style is 2 (Always adjust camera): set it to Only when moving"), "  saying why")
-local function exitPart(first, styleName)
+-- `back`: the view the client comes back on after the /reload (the trial's
+-- own, 3, unless given). The expectation is the saved one, so a different
+-- view fails (Codex, PR #64).
+local function exitPart(first, styleName, back)
     S.Run()
     check(SC:IsActive(), ("r12view %d: presenting on %s"):format(first, styleName))
     S.Run()   -- Close
@@ -1033,14 +1036,23 @@ local function exitPart(first, styleName)
         ("r12view %d: the exit ended on the own view at the zoom of Open"):format(first + 2))
     eq(r.check, "PASS", "  PASS")
     S.Answer(true); S.Answer(true)
+    eq(LibShowcaseProbeDB.r12 and LibShowcaseProbeDB.r12.view, "3", "  the expected view saved")
+    if back then WoW.cvars.cameraView = back end
     S.Next()   -- the /reload
-    eq(rec.results[first + 6].check, "PASS", ("r12view %d: still the own view after the /reload"):format(first + 6))
+    local r8 = rec.results[first + 6]
+    if back then
+        eq(r8.check, "FAIL", ("r12view %d: back on view %s after the /reload: FAIL"):format(first + 6, back))
+        check(tostring(r8.detail):find("cameraView " .. back .. " (want 3)", 1, true), "  against the saved view")
+        WoW.cvars.cameraView = "3"
+    else
+        eq(r8.check, "PASS", ("r12view %d: still the own view after the /reload"):format(first + 6))
+    end
     S.Answer(true)
 end
 WoW.cvars.cameraSmoothStyle = "4"
 exitPart(2, "Only when moving")
 WoW.cvars.cameraSmoothStyle = "2"
-exitPart(10, "Always")
+exitPart(10, "Always", "2")
 -- The login repair, through the probe's own db.
 LibShowcaseProbeDB.LibShowcaseViewRepaired = true
 S.Run()
@@ -1063,7 +1075,18 @@ eq(rec.status, "done", "the r12view procedure finishes")
 eq(WoW.cvars.cameraView, "2", "  back on view 2")
 expectedErrors = expectedErrors + (#errors - errs6)
 eq(#errors - errs6, 1, "  one refusal, the wrong style")
-WoW.cvars.cameraSmoothStyle = "4"
+-- The expectation missing after the /reload (a run started before this
+-- check saved it): FAIL, never a pass.
+WoW.cvars.cameraView, WoW.cvars.cameraSmoothStyle = "3", "4"
+fp("steps ls r12view")
+rec = record("r12view")
+S.Next(); S.Run(); S.Run(); untilEnded(); WoW.advance(3); S.Poll()
+S.Answer(true); S.Answer(true)
+LibShowcaseProbeDB.r12 = nil
+S.Next()   -- the /reload
+eq(rec.results[8].check, "FAIL", "r12view 8: no saved expectation: FAIL")
+check(tostring(rec.results[8].detail):find("want missing", 1, true), "  saying so")
+fp("steps stop")
 
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place

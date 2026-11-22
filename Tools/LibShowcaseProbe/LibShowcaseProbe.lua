@@ -1938,6 +1938,13 @@ end
 -- would overwrite the player's own view 2.
 local R12 = {}
 
+-- The trial's expected view, kept in the saved variables: a /reload
+-- recreates R12 (Codex, PR #64).
+local function R12Saved()
+    LibShowcaseProbeDB.r12 = type(LibShowcaseProbeDB.r12) == "table" and LibShowcaseProbeDB.r12 or {}
+    return LibShowcaseProbeDB.r12
+end
+
 local function R12Open(want)
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local style = tostring(GetCVar("cameraSmoothStyle"))
@@ -1948,6 +1955,7 @@ local function R12Open(want)
     local v = tostring(GetCVar("cameraView"))
     if v == "5" then error("on view 5: type /run SetView(2), then Retry", 0) end
     R12.view, R12.zoom, R12.endedAt, R12.verdict = v, tonumber(GetCameraZoom()), nil, nil
+    R12Saved().view = v
     OpenOrThrow()
     local line = ("%s: presenting from cameraView %s, zoom %s"):format(STYLE_NAMES[want], v, tostring(R12.zoom))
     say("== r12view " .. line)
@@ -1975,10 +1983,11 @@ local function R12Verdict()
     return v[1], v[2]
 end
 
+-- A missing expectation fails: nothing to compare with is not a pass.
 local function R12Read(tag, want)
     local view = tostring(GetCVar("cameraView"))
-    R12.verdict = { want == nil or view == want, ("%s: cameraView %s%s"):format(tag, view,
-        want and (" (want " .. want .. ")") or "") }
+    R12.verdict = { want ~= nil and view == tostring(want), ("%s: cameraView %s (want %s)"):format(tag, view,
+        want ~= nil and tostring(want) or "missing: the trial's start wasn't saved") }
     say("== r12view " .. R12.verdict[2])
     return true, R12.verdict[2]
 end
@@ -2015,7 +2024,7 @@ local function R12Exit(want)
         { text = ("On %s: %s"):format(name, SV_ASK), ask = true },
         { text = "Type /reload: does it last?", reload = true },
         { text = "Reading the view after the /reload.", auto = true,
-          run = function() return R12Read("reload on " .. name, R12.view) end, check = R12Verdict },
+          run = function() return R12Read("reload on " .. name, R12Saved().view) end, check = R12Verdict },
         { text = "After the /reload: " .. SV_ASK, ask = true },
     }
 end

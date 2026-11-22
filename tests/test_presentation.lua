@@ -496,7 +496,7 @@ end
 
 ------------------------------------------------------------------------------
 -- #51: the view an exit ends on. Ending on the saved view stops the camera
--- following (MEASURED 70959+, viewfix runs #577 to #590): on a style that
+-- following (MEASURED 71037, viewfix runs #577 to #590): on a style that
 -- follows, the exit ends on the player's own view and puts the zoom back; on
 -- Never, it snaps back to the saved view and writes cameraView back.
 ------------------------------------------------------------------------------
