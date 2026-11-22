@@ -1271,7 +1271,8 @@ do
     S.Run()
     eq(WoW.cvars.cameraView, "4", "view4clear 8: on view 4")
     S.Answer(true); S.Next()
-    eq(rec.results[11].check, "PASS", "view4clear 11: still view 4 after the /reload, cleared in this run")
+    eq(rec.results[11].check, "PASS", "view4clear 11: still view 4 after the /reload, a clear attempted in this run")
+    check(tostring(rec.results[11].detail):find("setters accepted 3 of 3", 1, true), "  with the setters' answers")
     S.Answer(true)
     eq(rec.status, "done", "the view4clear procedure finishes")
     eq(WoW.cvars.cameraView, "2", "  back on view 2")
@@ -1283,6 +1284,27 @@ do
     S.Skip()   -- the clear
     S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
     eq(rec.results[11].check, "FAIL", "view4clear 11: no clear in this run: FAIL")
+    fp("steps stop")
+    -- Setters that refuse (MEASURED run #611: nil) are reported as such.
+    C_CVar.SetCVar = function() return nil end
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next(); S.Run(); S.Answer(true); S.Run()
+    check(tostring(rec.results[5].detail):find("C_CVar.SetCVar(cameraDistanceD) -> nil", 1, true), "view4clear 5: a setter's nil logged")
+    S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
+    check(tostring(rec.results[11].detail):find("setters accepted 0 of 3", 1, true), "view4clear 11: none accepted, said so")
+    fp("steps stop")
+    -- A refused start, then skipped: an earlier run's marker doesn't survive.
+    LibShowcaseProbeDB.view4clear = { attempted = true, accepted = 3 }
+    WoW.cvars.cameraSmoothStyle = "0"
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next()
+    eq(rec.at, 2, "view4clear 2: refused on Never")
+    eq(LibShowcaseProbeDB.view4clear.attempted, nil, "  the earlier run's marker already gone")
+    WoW.cvars.cameraSmoothStyle = "4"
+    S.Skip(); S.Run(); S.Answer(true); S.Skip(); S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
+    eq(rec.results[11].check, "FAIL", "view4clear 11: start and clear skipped: FAIL")
     fp("steps stop")
     rawset(_G, "C_CVar", had)
 end

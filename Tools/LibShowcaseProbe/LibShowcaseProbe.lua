@@ -2374,44 +2374,54 @@ local function V4CRead(tag)
     return line
 end
 
+-- The run's state is reset before any guard: a refused start that is then
+-- skipped can't leave an earlier run's marker (Codex, PR #76).
 local function V4CStart()
+    LibShowcaseProbeDB.view4clear, V4C.obs = {}, {}
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
     local style = tostring(GetCVar("cameraSmoothStyle"))
     if not FOLLOWING_STYLES[style] then
         error(("Camera Following Style is %s (%s), which never follows: set it to Only when moving"
             .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
     end
-    LibShowcaseProbeDB.view4clear, V4C.obs = {}, {}
     return V4CRead("start")
 end
 
 -- ResetView(4) while on view 2, then each CVar set with no value (the
--- client's default, if it takes one), each result logged.
+-- client's default, if it takes one), each result logged. Recorded as an
+-- attempt with the setters' answers: only the cache on disk, read by the
+-- session, confirms a clear (Codex, PR #76). MEASURED 71037 (run #611):
+-- each setter returned nil, and config-cache.wtf kept view 4.
 local function V4CClear()
     if tostring(GetCVar("cameraView")) == "4" then pcall(SetView, 2) end
     local done = {}
     local ok, err = pcall(ResetView, 4)
     done[#done + 1] = "ResetView(4) " .. (ok and "ok" or ("error " .. tostring(err)))
     local c = G("C_CVar")
+    local accepted = 0
     for _, name in ipairs(VIEW4_CVARS) do
         if type(c) == "table" and type(c.SetCVar) == "function" then
             local p = { pcall(c.SetCVar, name) }
+            if p[1] and p[2] == true then accepted = accepted + 1 end
             done[#done + 1] = ("C_CVar.SetCVar(%s) %s"):format(name, p[1] and ("-> " .. tostring(p[2])) or ("error " .. tostring(p[2])))
         else
             done[#done + 1] = "C_CVar.SetCVar missing"
         end
     end
     LibShowcaseProbeDB.view4clear = LibShowcaseProbeDB.view4clear or {}
-    LibShowcaseProbeDB.view4clear.cleared = true
+    LibShowcaseProbeDB.view4clear.attempted, LibShowcaseProbeDB.view4clear.accepted = true, accepted
     say("== view4clear " .. table.concat(done, "; "))
     return table.concat(done, "; ") .. " ~~ " .. V4CRead("after")
 end
 
 local function V4CReadView()
     local view = tostring(GetCVar("cameraView"))
-    local cleared = type(LibShowcaseProbeDB.view4clear) == "table" and LibShowcaseProbeDB.view4clear.cleared
-    V4C.obs.reload = { cleared == true and view == "4",
-        ("after the /reload: cameraView %s (want 4), cleared in this run %s"):format(view, tostring(cleared)) }
+    local run = type(LibShowcaseProbeDB.view4clear) == "table" and LibShowcaseProbeDB.view4clear or {}
+    -- PASS: still on view 4 after a clear attempt in this run. Whether the
+    -- clear took is the setters' answer here, and the cache on disk.
+    V4C.obs.reload = { run.attempted == true and view == "4",
+        ("after the /reload: cameraView %s (want 4); clear attempted in this run %s, setters accepted %s of 3")
+            :format(view, tostring(run.attempted == true), tostring(run.accepted or 0)) }
     say("== view4clear " .. V4C.obs.reload[2])
     return true, V4C.obs.reload[2]
 end
@@ -2427,7 +2437,7 @@ Probe:Steps("view4clear", {
     { text = "On view 2 (the control; it should follow): " .. SV_ASK, ask = true },
     { text = "Clear view 4: ResetView(4), then view 4's three CVars set to the client's default.", button = "Clear view 4",
       run = V4CClear },
-    { text = "Type /reload: the client writes its cache, and view 4 loads from it.", reload = true },
+    { text = "Type /reload: the client writes its cache (the session reads it afterwards).", reload = true },
     { text = "Reading view 4's CVars after the /reload.", auto = true, run = function() return V4CRead("after the /reload") end },
     { text = "SetView(4): the cleared view 4.", button = "SetView(4)", run = function() return SVCall("SetView", 4) end },
     { text = "On the cleared view 4: " .. SV_ASK, ask = true },
