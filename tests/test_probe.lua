@@ -884,11 +884,17 @@ rec = record("savedview")
 S.Next()
 eq(rec.at, 2, "savedview 2: refused in gamepad mode")
 style2 = 0
+WoW.cvars.cameraSmoothStyle = "4"
+S.Run()
+eq(rec.at, 2, "savedview 2: refused on Only in combat (4)")
+check(logHas("Camera Following Style is 4, which doesn't follow out of combat"), "  saying why")
+WoW.cvars.cameraSmoothStyle = "2"
 S.Run()
 local start = tostring(rec.results[2].detail)
 check(start:find("start: cameraView 5", 1, true), "savedview 2: the view read")
 check(start:find("view 5: distance 8.979999 (default 15)", 1, true), "  and saved view 5's non-default distance")
 check(not start:find("pitch", 1, true) and not start:find("view 4", 1, true), "  only what differs from the default")
+check(start:find("(3 of 15 readable)", 1, true), "  with how many GetCVar sees")
 S.Answer(false)
 WoW.camera.savedViews[5] = 12
 S.Run()
@@ -922,7 +928,8 @@ eq(rec.status, "done", "the savedview procedure finishes")
 eq(WoW.camera.savedViews[5], nil, "  its cleanup reset saved view 5")
 eq(WoW.cvars.cameraView, "2", "  on view 2")
 expectedErrors = expectedErrors + (#errors - errs4)
-eq(#errors - errs4, 1, "  one refusal, gamepad mode")
+eq(#errors - errs4, 2, "  two refusals: gamepad mode, Only in combat")
+WoW.cvars.cameraSmoothStyle = "4"
 rawset(_G, "C_CVar", hadCVar2)
 rawset(_G, "C_InputInterfaceStyle", nil)
 WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE, WoW.cvars.cameraDistanceD = nil, nil, nil

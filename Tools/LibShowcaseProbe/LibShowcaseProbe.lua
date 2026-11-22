@@ -1675,14 +1675,18 @@ end
 
 -- Every saved view's distance, pitch and yaw that differs from its default
 -- (cameraDistanceA..E, cameraPitchA..E, cameraYawA..E; views 1 to 5).
+-- Run #567 read none that differed, while config-cache.wtf kept
+-- cameraDistanceE and cameraPitchE: the count of readable ones says whether
+-- GetCVar sees them at all.
 local function SavedViews()
-    local parts = {}
+    local parts, readable = {}, 0
     for i, letter in ipairs(VIEW_LETTERS) do
         local view = {}
         for _, what in ipairs({ "Distance", "Pitch", "Yaw" }) do
             local name = "camera" .. what .. letter
             local ok, v = pcall(GetCVar, name)
             if ok and v ~= nil then
+                readable = readable + 1
                 local d = CVarDefault(name)
                 if d == nil or not SameValue(v, d) then
                     view[#view + 1] = ("%s %s (default %s)"):format(what:lower(), tostring(v), tostring(d))
@@ -1691,7 +1695,8 @@ local function SavedViews()
         end
         if #view > 0 then parts[#parts + 1] = ("view %d: %s"):format(i, table.concat(view, ", ")) end
     end
-    return #parts > 0 and table.concat(parts, "; ") or "every saved view at its default"
+    local tail = (" (%d of 15 readable)"):format(readable)
+    return (#parts > 0 and table.concat(parts, "; ") or "every readable saved view at its default") .. tail
 end
 
 local function SVRead(tag)
@@ -1702,8 +1707,19 @@ local function SVRead(tag)
     return line
 end
 
+-- Only a style that follows out of combat can show the bug: run #567 ran on
+-- 4, the client's default, which the dropdown names "Only in combat" (the
+-- owner, 70959+; Blizzard_SettingsDefinitions_Frame/Controls.lua lists 1, 4,
+-- 2 and 0), so every answer was "no" whatever the view.
+local FOLLOWING_STYLES = { ["1"] = true, ["2"] = true }
+
 local function SVStart()
     if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s, which doesn't follow out of combat: set it to Always"
+            .. " (Options > Controls > Camera), then Retry"):format(style), 0)
+    end
     return SVRead("start")
 end
 
@@ -1723,8 +1739,8 @@ end
 
 Probe:Steps("savedview", {
     title = "Saved view 5 and a camera that stays put (#51)",
-    { text = "Mouse and keyboard (no gamepad), out of combat, somewhere open with room to walk. Camera Following Style"
-        .. " must not be Never: write which it is in the Note box. Every question is the same test: " .. SV_ASK
+    { text = "Mouse and keyboard (no gamepad), out of combat, somewhere open with room to walk. Set Camera Following"
+        .. " Style to Always (Options > Controls > Camera; Only in combat never follows out of combat). Every question is the same test: " .. SV_ASK
         .. " Watch for that each time: a camera that stays where you left it is the bug. This resets your saved"
         .. " view 5 (the library has already overwritten it)." },
     { text = "Reading the view and the saved views.", auto = true, run = SVStart },
