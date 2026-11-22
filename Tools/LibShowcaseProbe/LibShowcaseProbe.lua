@@ -45,6 +45,8 @@
 --   r13cast   the r13 release check (#66): castAware from the player's own
 --             view 4, a cast, Close: back on that view 4, following, after a
 --             /reload too
+--   view4     does view 4 follow: at its default, and after SaveView(4) from
+--             view 2 then SetView(4), each across a /reload (#66, run #601)?
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -2084,9 +2086,20 @@ local function R13Saved()
     return LibShowcaseProbeDB.r13
 end
 
-local function R13Verdict()
-    local v = R13.verdict or { false, "not read" }
-    return v[1], v[2]
+-- Each wait and read has its own observation: a check never takes another
+-- step's (Done by hand before the read fails; Codex, PR #71).
+R13.obs = {}
+local function R13Check(key)
+    return function()
+        local v = R13.obs[key]
+        if not v then return false, key .. ": not observed (Done before it was read)" end
+        return v[1], v[2]
+    end
+end
+local function R13Observe(key, ok, line, prefix)
+    R13.obs[key] = { ok, line }
+    say((prefix or "  ") .. "r13cast " .. line)
+    return true, line
 end
 
 local function R13Start()
@@ -2115,7 +2128,7 @@ end
 
 local function R13Open()
     if tostring(GetCVar("cameraView")) ~= "4" then error("not on view 4: Back to Save as view 4, then Retry", 0) end
-    R13.zoom, R13.endedAt, R13.verdict, R13.cast, R13.armed = tonumber(GetCameraZoom()), nil, nil, nil, true
+    R13.zoom, R13.endedAt, R13.obs, R13.cast, R13.armed = tonumber(GetCameraZoom()), nil, {}, nil, true
     SC.opts.castAware = true
     local ok, err = pcall(OpenOrThrow)
     if not ok then
@@ -2130,15 +2143,12 @@ end
 -- The entry settled: r13 saved nothing into view 4.
 local function R13Settled()
     if not SC:IsActive() then
-        R13.verdict = { false, "the presentation ended before it settled" }
-        return true, R13.verdict[2]
+        return R13Observe("settle", false, "the presentation ended before it settled")
     end
     local cam = lib().state.cam
     if cam.mode == "enter" then return false, "entering" end
-    R13.verdict = { cam.presentationViewSaved == false,
-        ("settled: presentationViewSaved %s (want false: nothing saved into view 4)"):format(tostring(cam.presentationViewSaved)) }
-    say("  r13cast " .. R13.verdict[2])
-    return true, R13.verdict[2]
+    return R13Observe("settle", cam.presentationViewSaved == false,
+        ("settled: presentationViewSaved %s (want false: nothing saved into view 4)"):format(tostring(cam.presentationViewSaved)))
 end
 
 -- The library's handler and this one run in no set order: the mode is read
@@ -2155,15 +2165,12 @@ end)
 
 local function R13CastSeen()
     if not SC:IsActive() then
-        R13.verdict = { false, "the presentation ended before a cast" }
-        return true, R13.verdict[2]
+        return R13Observe("cast", false, "the presentation ended before a cast")
     end
     if not R13.cast then return false, "waiting for a cast" end
-    R13.verdict = { R13.cast.mode == "castReset",
+    return R13Observe("cast", R13.cast.mode == "castReset",
         ("a cast: mode %s, cameraView %s (want castReset, the swing: no saved view to go back to)")
-            :format(R13.cast.mode, R13.cast.view) }
-    say("  r13cast " .. R13.verdict[2])
-    return true, R13.verdict[2]
+            :format(R13.cast.mode, R13.cast.view))
 end
 
 -- The exit's result, 2 s after the presentation ended: view 4, the zoom of Open.
@@ -2174,25 +2181,37 @@ local function R13Exited()
     if GetTime() - R13.endedAt < 2 then return false, "settling" end
     local view, zoom = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom())
     local zoomOK = zoom ~= nil and R13.zoom ~= nil and math.abs(zoom - R13.zoom) < 0.1
-    R13.verdict = { view == "4" and zoomOK,
-        ("ended on cameraView %s (want 4), zoom %s (at Open %s)"):format(view, tostring(zoom), tostring(R13.zoom)) }
-    say("  r13cast " .. R13.verdict[2])
-    return true, R13.verdict[2]
+    return R13Observe("exit", view == "4" and zoomOK,
+        ("ended on cameraView %s (want 4), zoom %s (at Open %s)"):format(view, tostring(zoom), tostring(R13.zoom)))
 end
 
 local function R13Read()
     local want = R13Saved().view
     local view = tostring(GetCVar("cameraView"))
-    R13.verdict = { want ~= nil and view == want, ("after the /reload: cameraView %s (want %s)"):format(view,
-        want or "missing: the trial's start wasn't saved") }
-    say("== r13cast " .. R13.verdict[2])
-    return true, R13.verdict[2]
+    return R13Observe("reload", want ~= nil and view == want, ("after the /reload: cameraView %s (want %s)"):format(view,
+        want or "missing: the trial's start wasn't saved"), "== ")
 end
 
+-- Stopped mid-trial (Stop, /fp steps stop, another procedure): the
+-- presentation closes and castAware goes off, so a later /fp ls show isn't
+-- cast-aware (Codex, PR #71).
+local function R13Disarm()
+    SC.opts.castAware, R13.armed = false, nil
+    if SC:IsActive() then
+        Close()
+        SC:Exit("r13cast stopped")   -- false when the window's hide already started the exit
+    end
+end
+local function R13Leave(outcome)
+    if outcome == "stopped" then R13Disarm() end
+end
+
+-- The end: view 4 reset, then the start's view, or view 2 when that was 4 or
+-- 5 (run #601 started on 4 and was put back on it; 2 is measured to follow).
 local function R13Cleanup()
     SC.opts.castAware, R13.armed = false, nil
     local from = tonumber(R13Saved().from)
-    if not from or from < 1 or from > 5 or from == 5 then from = 2 end
+    if not from or from < 1 or from > 3 then from = 2 end
     return SVCall("ResetView", 4, "SetView", from)
 end
 
@@ -2207,22 +2226,105 @@ Probe:Steps("r13cast", {
     { text = "With the left mouse button, turn the camera to look at your character's face, at a zoom you'll"
         .. " recognize. Then Save as view 4.", button = "Save as view 4", run = R13MakeView },
     { text = "Open starts a presentation with castAware on. Remember where the camera is now (in front of you).",
-      button = "Open", run = R13Open },
-    { text = "Waiting for the entry to settle.", timeout = 20, wait = R13Settled, check = R13Verdict },
+      button = "Open", run = R13Open, leave = R13Leave },
+    { text = "Waiting for the entry to settle.", timeout = 20, wait = R13Settled, check = R13Check("settle"),
+      leave = R13Leave },
     { text = "Cast the spell (let it run a second; jumping cancels it). Watch: a short swing, not a jump to a saved"
-        .. " view. Don't press Escape.", timeout = 120, wait = R13CastSeen, check = R13Verdict },
+        .. " view. Don't press Escape.", timeout = 120, wait = R13CastSeen, check = R13Check("cast"),
+      leave = R13Leave },
     { text = "Let the cast end, then Close. Watch where the camera ends: in front of your character (your view 4)?",
-      button = "Close", run = Close },
-    { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20, wait = R13Exited, check = R13Verdict },
+      button = "Close", run = Close, leave = R13Leave },
+    { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20, wait = R13Exited,
+      check = R13Check("exit"), leave = R13Leave },
     { text = "Did the camera end in front of your character, looking at its face, at the zoom you had at Open?"
         .. " (Anything else: the Note box.)", ask = true },
     { text = "On your view 4: " .. SV_ASK, ask = true },
     { text = "Type /reload: does it last?", reload = true },
-    { text = "Reading the view after the /reload.", auto = true, run = R13Read, check = R13Verdict },
+    { text = "Reading the view after the /reload.", auto = true, run = R13Read, check = R13Check("reload") },
     { text = "After the /reload: " .. SV_ASK, ask = true },
-    { text = "Resetting view 4 to the client's default and going back to the view you started on.", auto = true,
+    { text = "Resetting view 4 to the client's default, then back to the view you started on (view 2 if that was 4 or 5).", auto = true,
       run = R13Cleanup },
 })
+
+-- 22. Does view 4 follow (#66, after run #601)? r13cast ended on the
+-- player's own view 4, as made by the probe's SaveView(4), and the tester
+-- answered that the camera didn't follow, also after a /reload. #51 measured
+-- that SetView onto view 5 after SaveView(5) stops the camera following; r10
+-- to r12's castAware wrote view 4 the same way at every presentation. So:
+-- view 2 (the control), view 4 at the client's default (ResetView), and view
+-- 4 after SaveView(4) from view 2 then SetView(4) (the castAware save, then
+-- r13's exit), each across a /reload. The end resets view 4, back on view 2.
+local function V4Saved()
+    LibShowcaseProbeDB.view4 = type(LibShowcaseProbeDB.view4) == "table" and LibShowcaseProbeDB.view4 or {}
+    return LibShowcaseProbeDB.view4
+end
+
+local V4 = { obs = {} }
+local function V4Check(key)
+    return function()
+        local v = V4.obs[key]
+        if not v then return false, key .. ": not read" end
+        return v[1], v[2]
+    end
+end
+
+local function V4Start()
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s (%s), which never follows: set it to Only when moving"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
+    end
+    return SVRead("start")
+end
+
+local function V4Set(key, ...)
+    local line = SVCall(...)
+    V4Saved()[key] = tostring(GetCVar("cameraView"))
+    return line
+end
+
+local function V4Read(key, want)
+    local view = tostring(GetCVar("cameraView"))
+    local saved = V4Saved()[key]
+    V4.obs[key] = { saved == want and view == want, ("%s after the /reload: cameraView %s (want %s, set %s)")
+        :format(key, view, want, tostring(saved)) }
+    say("== view4 " .. V4.obs[key][2])
+    return true, V4.obs[key][2]
+end
+
+local function V4Part(key, label, button, ...)
+    local calls = { ... }
+    return {
+        { text = label .. " " .. button .. " does it.", button = button,
+          run = function() return V4Set(key, unpack(calls)) end },
+        { text = label .. ": " .. SV_ASK, ask = true },
+        { text = "Type /reload: does it last?", reload = true },
+        { text = "Reading the view after the /reload.", auto = true,
+          run = function() return V4Read(key, "4") end, check = V4Check(key) },
+        { text = "After the /reload, " .. label:lower() .. ": " .. SV_ASK, ask = true },
+    }
+end
+
+do
+    local steps = {
+        title = "Does view 4 follow (#66, after run #601)",
+        { text = "Mouse and keyboard, out of combat, room to walk, Camera Following Style Only when moving. Every"
+            .. " question is the same test: " .. SV_ASK .. " Three views: view 2 first (it should follow: the"
+            .. " control), then view 4 at the client's default, then view 4 written the way castAware writes it."
+            .. " Answer each as you see it; a no is as useful as a yes." },
+        { text = "Checking the style.", auto = true, run = V4Start },
+        { text = "The control: SetView(2).", button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+        { text = "On view 2 (the control; it should follow): " .. SV_ASK, ask = true },
+    }
+    for _, step in ipairs(V4Part("default", "View 4 at the client's default:", "ResetView(4), SetView(4)",
+        "ResetView", 4, "SetView", 4)) do steps[#steps + 1] = step end
+    for _, step in ipairs(V4Part("saved", "View 4 saved from view 2 (castAware's save, then the exit):",
+        "SetView(2), SaveView(4), SetView(4)", "SetView", 2, "SaveView", 4, "SetView", 4)) do steps[#steps + 1] = step end
+    steps[#steps + 1] = { text = "Resetting view 4 to the client's default, then back to view 2.", auto = true,
+        run = function() return SVCall("ResetView", 4, "SetView", 2) end }
+    Probe:Steps("view4", steps)
+end
 
 ----------------------------------------------------------------------------
 -- Load
