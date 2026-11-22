@@ -37,7 +37,7 @@
 --   never touches a frame or the camera.
 -- - lib.ready = MINOR is the last line: New refuses a half-loaded copy.
 
-local MAJOR, MINOR = "LibShowcase-1.0", 14
+local MAJOR, MINOR = "LibShowcase-1.0", 15
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end   -- an equal or newer copy is already loaded
 
@@ -1111,14 +1111,22 @@ function I.Enter(inst, anchor)
     I.Heal(inst)
 
     local cfg = I.Config(inst)
-    local capture = { savedViewSlot = cfg.savedViewSlot, zoom = tonumber(GetCameraZoom()) or 0 }
+    -- viewSlot: the configured slot, for the exit's own-view rules. The
+    -- capture's savedViewSlot means "this presentation saved there", as every
+    -- older copy reads it: set only once SaveView ran (#75).
+    local capture = { viewSlot = cfg.savedViewSlot, zoom = tonumber(GetCameraZoom()) or 0 }
     -- The player's own view, where the exit ends (#51). Read before SetView
     -- moves it.
     if type(GetCVar) == "function" then capture.view = tonumber(GetCVar("cameraView")) end
     -- castAware writes this slot, and a written view stops following, so the
     -- exit doesn't end there (#72). Kept in the capture for the crash heal.
     if cfg.castAware and cfg.presentationViewSlot then capture.presentationViewSlot = cfg.presentationViewSlot end
-    pcall(SaveView, capture.savedViewSlot)
+    -- A written view never follows again, and the client keeps it for the
+    -- account (MEASURED 71037, #75): the player's camera is saved only on
+    -- Never, whose exit snaps back to it. Elsewhere the exit doesn't use it.
+    if not I.CameraFollows() and pcall(SaveView, cfg.savedViewSlot) then
+        capture.savedViewSlot = cfg.savedViewSlot
+    end
     -- Crash self-heal: the capture lives in the consumer's SavedVariables
     -- until a restore clears it. Filled in as each CVar is changed.
     local db = I.DB(inst)
@@ -1244,16 +1252,30 @@ function I.FallbackView(slot, other)
     return slot == 2 and 3 or 2
 end
 
+-- The configured saved slot: viewSlot (MINOR 15), or an older copy's
+-- savedViewSlot, which it always saved into.
+function I.CaptureSlot(cap)
+    return tonumber(cap.viewSlot) or tonumber(cap.savedViewSlot)
+end
+
 -- The view an exit ends on: the player's own (cameraView at Enter), or the
 -- fallback when that was the saved slot, castAware's slot (#72), or isn't
--- known (an older copy's capture).
+-- known (an older copy's capture). Written by an earlier copy, either slot
+-- may not follow, whether or not this presentation saved (#75).
 function I.OwnView(cap)
     local v = tonumber(cap.view)
-    local cast = tonumber(cap.presentationViewSlot)
-    if not v or v < 1 or v > 5 or v == cap.savedViewSlot or v == cast then
-        return I.FallbackView(cap.savedViewSlot, cast)
+    local slot, cast = I.CaptureSlot(cap), tonumber(cap.presentationViewSlot)
+    if not v or v < 1 or v > 5 or v == slot or v == cast then
+        return I.FallbackView(slot, cast)
     end
     return math.floor(v)
+end
+
+-- Where a restore puts the camera: the exact snap-back to the saved view only
+-- on Never, when this presentation saved one; otherwise the player's own
+-- view and zoom (#75: a style switched either way mid-presentation too).
+function I.SnapBack(cap)
+    return not I.CameraFollows() and cap.savedViewSlot ~= nil
 end
 
 -- An older copy's capture (r13 and before) doesn't name castAware's slot: it
@@ -1284,14 +1306,14 @@ end
 -- CVar is written back at the end (RestoreCapture). True when it put the
 -- player's own view and zoom back, so the end of the exit leaves them.
 function I.ExitView(cap)
-    if not cap.savedViewSlot or type(SetView) ~= "function" then return false end
-    if I.CameraFollows() then
-        pcall(SetView, I.OwnView(cap))
-        if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
-        return true
+    if type(SetView) ~= "function" then return false end
+    if I.SnapBack(cap) then
+        pcall(SetView, cap.savedViewSlot)
+        return false
     end
-    pcall(SetView, cap.savedViewSlot)
-    return false
+    pcall(SetView, I.OwnView(cap))
+    if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
+    return true
 end
 
 -- Put the camera and every CVar back as captured. Shared by every restore
@@ -1301,10 +1323,11 @@ end
 -- SetView would snap the zoom to the view's own mid-animation). Anything
 -- else, an older copy's exit to the saved slot included, isn't done.
 function I.RestoreCapture(cap, viewDone)
-    local follows = I.CameraFollows()
-    if not (follows and viewDone == true) then
-        if cap.savedViewSlot and type(SetView) == "function" then
-            pcall(SetView, follows and I.OwnView(cap) or cap.savedViewSlot)
+    local snap = I.SnapBack(cap)
+    -- viewDone holds only while the destination is still the own view.
+    if snap or viewDone ~= true then
+        if type(SetView) == "function" then
+            pcall(SetView, snap and cap.savedViewSlot or I.OwnView(cap))
         end
         if type(GetCameraZoom) == "function" then I.SetZoom(cap.zoom or 0) end
     end
@@ -1334,7 +1357,7 @@ function I.RestoreCapture(cap, viewDone)
     if cap.pitchLimit and type(ConsoleExec) == "function" then pcall(ConsoleExec, "pitchlimit 88") end
     -- Never: the camera stays on the saved view's framing for this session,
     -- and the next login loads the player's own view, not the saved one.
-    if not follows and cap.savedViewSlot and type(SetCVar) == "function" then
+    if snap and type(SetCVar) == "function" then
         pcall(SetCVar, "cameraView", tostring(I.OwnView(cap)))
     end
 end
@@ -1400,23 +1423,13 @@ function I.OrbitSpeed(cfg)
     return cfg.orbitSpeed * (180 / I.YawMoveSpeed())
 end
 
--- The settled presentation: a slow orbit, or still. With castAware, the
--- settled view is saved first so a cast can return to it.
+-- The settled presentation: a slow orbit, or still. castAware saves no view
+-- (#75: a written view never follows again, and the client keeps it), so a
+-- cast takes the reset swing; an older copy that already saved one at its
+-- settle (presentationViewSaved) still returns to it.
 function I.Settle(cam)
     I.StopYaw()
     I.NoteCastSlot(cam)
-    local slot = cam.cfg.castAware and cam.cfg.presentationViewSlot
-    -- Never into the player's own view or the view the exit ends on (#66):
-    -- it would overwrite their framing, or load the presentation's as theirs.
-    -- A cast then takes the reset swing. Checked here, at the save: an older
-    -- copy's entry this copy takes over settles with that copy's cam.cfg
-    -- (Codex, PR #68).
-    if slot and cam.capture and (slot == tonumber(cam.capture.view) or slot == I.OwnView(cam.capture)) then
-        cam.presentationViewSaved = false
-        I.Debug(cam.inst, "castAware: the exit ends on the presentation slot " .. slot .. "; not saved")
-    elseif slot then
-        cam.presentationViewSaved = pcall(SaveView, slot) and true or false
-    end
     if cam.cfg.orbit then I.ApplyOrbit((cam.yawDir or 1) * I.OrbitSpeed(cam.cfg)) end
 end
 

@@ -541,4 +541,91 @@ do
     eq(WoW.camera.zoom, 12, "  at the player's zoom")
 end
 
+-- #75: r14 against this copy. r14 saved the player's view at every Enter and
+-- castAware's settled view at its settle; this copy saves neither on a
+-- following style.
+do  -- r14 enters castAware from view 3; this copy loads before the settle:
+    -- the settle runs here and writes nothing.
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r14"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette", castAware = true })
+    check(SC:Enter(newWindow("MEDIUM")), "r14 presents castAware, from view 3")
+    check(hasCall("SaveView(5)"), "  r14 saved the player's view at Enter")
+    ticks(0.1, 3)
+    loadCopy(copyOf(), "AltStable")
+    local from = #WoW.calls
+    ticks(0.1, 13)
+    local saved = false
+    for _, c in ipairs(callsSince(from)) do if c:find("^SaveView") then saved = true end end
+    check(not saved, "  the settle under the newer copy saves nothing into view 4")
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(old.state.cam.mode, "castReset", "  a cast takes the reset swing")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player"); ticks(0.1, 5)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on the player's view 3")
+end
+
+do  -- r14 settled and saved view 4; this copy loads: a cast still returns to
+    -- that saved view and holds, with no new write.
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r14"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette", castAware = true })
+    SC:Enter(newWindow("MEDIUM")); ticks(0.1, 16)
+    check(hasCall("SaveView(4)"), "r14 settled and saved view 4")
+    loadCopy(copyOf(), "AltStable")
+    local from = #WoW.calls
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(WoW.camera.view, 4, "  a cast under the newer copy returns to r14's saved view")
+    eq(old.state.cam.mode, "castHold", "  and holds at once")
+    local saved = false
+    for _, c in ipairs(callsSince(from)) do if c:find("^SaveView") then saved = true end end
+    check(not saved, "  with no new write")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on the player's view 3")
+end
+
+do  -- r14's capture (savedViewSlot set: r14 always saved) finished by this
+    -- copy on Never: the snap-back, as r14 meant.
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "0", "3"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r14"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette" })
+    SC:Enter(newWindow("MEDIUM")); ticks(0.1, 16)
+    loadCopy(copyOf(), "AltStable")
+    local from = #WoW.calls
+    SC:Exit("closed"); ticks(0.1, 6)
+    local first
+    for _, c in ipairs(callsSince(from)) do if c:find("^SetView") then first = first or c end end
+    eq(first, "SetView(5)", "r14's capture on Never under the newer copy: the snap-back")
+    eq(WoW.cvars.cameraView, "3", "  then cameraView written back")
+end
+
+do  -- This copy's capture with nothing saved, healed next session by r14 (a
+    -- downgrade across login): r14 never selects the unwritten slot.
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local lib = loadCopy(copyOf(), "AltStable")
+    local DB = {}
+    local SC = lib:New({ owner = "AltStable", db = DB })
+    WoW.camera.zoom = 12
+    SC:Enter(newWindow("MEDIUM")); ticks(0.1, 3)
+    local cap = DB.LibShowcaseCapture
+    eq(cap.savedViewSlot, nil, "this copy's capture: nothing saved")
+    -- The client dies; the next session loads only r14.
+    for _, style in ipairs({ "4", "0" }) do
+        WoW.reset(); WoW.resetLibStub()
+        WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, "2"
+        local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r14"), "AltStable")
+        local copy = {}
+        for k, v in pairs(cap) do copy[k] = v end
+        old:New({ owner = "AltStable", db = { LibShowcaseCapture = copy } })
+        WoW.fire("PLAYER_LOGIN")
+        check(not hasCall("SetView(5)"), "style " .. style .. ": r14's heal of it never selects view 5")
+        eq(WoW.camera.zoom, 12, "  and puts the zoom back")
+    end
+end
+
 done("test_upgrade")

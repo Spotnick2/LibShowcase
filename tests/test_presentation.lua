@@ -32,7 +32,8 @@ do
     eq(WoW.cvars.CameraReduceUnexpectedMovement, "0", "and the damping one")
     check(tonumber(WoW.cvars.test_cameraOverShoulder) > 0, "the shoulder offset is written")
     eq(WoW.cvars.cameraDistanceMaxZoomFactor, "2", "the zoom cap is lifted")
-    eq(WoW.camera.savedViews[5], 12, "the player's view is saved in slot 5")
+    eq(WoW.camera.savedViews[5], nil, "no view saved on a following style (#75)")
+    check(not hasCall("SaveView"), "  SaveView never called")
     eq(WoW.camera.view, 2, "the presentation starts from view 2")
     eq(WoW.popupShown, 0, "no experimental-CVar popup")
     check(hasCall("UnregisterInternalEvent(" .. "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED"), "suppressed through GameEvent")
@@ -279,8 +280,9 @@ do
 end
 
 ------------------------------------------------------------------------------
--- castAware: a cast puts the presentation view back and holds; its end
--- resumes the orbit.
+-- castAware: a cast takes the reset swing from view 2 and holds; its end
+-- resumes the orbit. No view is saved (#75: a written view never follows
+-- again, and the client keeps it for the account, MEASURED 71037).
 ------------------------------------------------------------------------------
 do
     local lib = freshLibrary()
@@ -288,27 +290,48 @@ do
     SC:Enter()
     check(lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "cast events registered while presenting")
     ticks(0.1, 16)
-    eq(WoW.camera.savedViews[4], WoW.camera.zoom, "the settled view is saved in slot 4")
+    check(not hasCall("SaveView"), "castAware: no view saved, entry or settle (#75)")
+    eq(lib.state.cam.presentationViewSaved, nil, "  nothing to return to")
     check(WoW.camera.yaw ~= nil, "orbiting")
     WoW.fire("UNIT_SPELLCAST_START", "target")
     check(WoW.camera.yaw ~= nil, "another unit's cast changes nothing")
     WoW.fire("UNIT_SPELLCAST_START", "player")
-    eq(WoW.camera.view, 4, "a cast returns to the presentation view")
-    eq(WoW.camera.yaw, nil, "and holds still")
-    eq(lib.state.cam.mode, "castHold", "")
+    eq(lib.state.cam.mode, "castReset", "a cast takes the reset swing")
+    eq(WoW.camera.view, 2, "  from view 2")
+    ticks(0.1, 5)
+    eq(lib.state.cam.mode, "castHold", "  then holds")
+    eq(WoW.camera.yaw, nil, "  still")
     WoW.fire("UNIT_SPELLCAST_STOP", "player")
     eq(WoW.camera.yaw, -0.005, "its end resumes the orbit")
 
-    -- Without a saved presentation view: a short reset swing, then hold.
-    lib.state.cam.presentationViewSaved = false
+    -- A stop during the swing waits for it.
     WoW.fire("UNIT_SPELLCAST_CHANNEL_START", "player")
-    eq(lib.state.cam.mode, "castReset", "no saved view: a reset swing")
+    eq(lib.state.cam.mode, "castReset", "a channel: the reset swing")
     WoW.fire("UNIT_SPELLCAST_CHANNEL_STOP", "player")
     eq(lib.state.cam.mode, "castReset", "a stop during the swing waits for it")
     ticks(0.1, 5)
     eq(WoW.camera.yaw, -0.005, "  then resumes the orbit")
+    check(not hasCall("SaveView"), "  still no view saved")
+
+    -- An older copy's presentation that saved its settled view still holds on it.
+    lib.state.cam.presentationViewSaved = true
+    WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(WoW.camera.view, 4, "a view an older copy saved: a cast returns to it")
+    eq(lib.state.cam.mode, "castHold", "  and holds at once")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
     SC:ForceRestore()
     check(not lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "cast events dropped on restore")
+
+    -- Orbit off: the swing, then a hold, and nothing to resume.
+    lib = freshLibrary()
+    SC = lib:New({ owner = "PortalRoulette", castAware = true, orbit = false })
+    SC:Enter(); ticks(0.1, 16)
+    eq(WoW.camera.yaw, nil, "orbit off: still once settled")
+    WoW.fire("UNIT_SPELLCAST_START", "player"); ticks(0.1, 5)
+    eq(lib.state.cam.mode, "castHold", "  a cast swings, then holds")
+    WoW.fire("UNIT_SPELLCAST_STOP", "player")
+    eq(WoW.camera.yaw, nil, "  its end resumes nothing")
+    SC:ForceRestore()
 
     -- A client without RegisterUnitEvent: plain events, filtered by unit here.
     lib = freshLibrary()
@@ -325,15 +348,14 @@ do
     check(not lib.eventFrame:IsEventRegistered("UNIT_SPELLCAST_START"), "not registered without castAware")
 end
 
--- #66: castAware never saves into the player's own view or the view the exit
--- ends on: a player whose own view is presentationViewSlot keeps its framing,
--- and a cast takes the reset swing. #72: the exit doesn't end on castAware's
--- slot either (a written view 4 stops following, MEASURED 71037, runs #601 to
--- #606): it ends on the fallback, view 2.
+-- #72: with castAware the exit doesn't end on castAware's slot (a written
+-- view 4 stops following, MEASURED 71037, runs #601 to #606): it ends on the
+-- fallback, view 2. #75: nothing writes view 4 any more, but an earlier copy
+-- may have, so the rule stays.
 local function castAwareOn(style, view, opts)
     local lib = freshLibrary()
     WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, view
-    WoW.camera.savedViews[4] = 7              -- the player's own view 4
+    WoW.camera.savedViews[4] = 7              -- view 4, as an earlier copy left it
     opts = opts or {}
     opts.owner, opts.castAware = "PortalRoulette", true
     local SC = lib:New(opts)
@@ -345,8 +367,8 @@ end
 
 for _, style in ipairs({ "4", "0" }) do
     local lib, SC = castAwareOn(style, "4")
-    check(not hasCall("SaveView(4)"), "style " .. style .. ", own view 4: the settled view is not saved into it")
-    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps the player's framing")
+    check(not hasCall("SaveView(4)"), "style " .. style .. ", own view 4: nothing saved into it")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 untouched")
     WoW.fire("UNIT_SPELLCAST_START", "player")
     eq(lib.state.cam.mode, "castReset", "  a cast takes the reset swing")
     eq(WoW.camera.view, 2, "  from view 2, not view 4")
@@ -355,43 +377,39 @@ for _, style in ipairs({ "4", "0" }) do
     SC:Exit("closed"); ticks(0.1, 6)
     check(not SC:IsActive(), "  the exit completes")
     eq(WoW.cvars.cameraView, "2", "  the player ends on (or, on Never, logs in to) view 2, not castAware's slot (#72)")
-    eq(WoW.camera.savedViews[4], 7, "  view 4 keeps its own framing")
+    eq(WoW.camera.savedViews[4], 7, "  view 4 untouched")
     eq(lib.state.cam.capture, nil, "  restored")
 end
 
-do  -- Another own view: the settled view is saved in 4 as before.
+do  -- Another own view: still nothing saved into 4 (#75), and the exit ends on it.
     local lib, SC = castAwareOn("4", "3")
-    check(hasCall("SaveView(4)"), "own view 3: the settled view is saved in slot 4")
+    check(not hasCall("SaveView"), "own view 3: no view saved")
     WoW.fire("UNIT_SPELLCAST_START", "player")
-    eq(lib.state.cam.mode, "castHold", "  and a cast returns to it")
-    SC:ForceRestore()
+    eq(lib.state.cam.mode, "castReset", "  a cast takes the reset swing")
+    ticks(0.1, 5)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on the player's view 3")
 end
 
-do  -- castAware's slot 2: the fallback avoids it (#72), so it is saved.
+do  -- castAware's slot 2: the fallback avoids it (#72).
     local lib, SC = castAwareOn("4", "5", { presentationViewSlot = 2 })
-    check(hasCall("SaveView(2)"), "presentationViewSlot 2, own view the saved one: saved in 2")
+    check(not hasCall("SaveView"), "presentationViewSlot 2: no view saved")
     SC:Exit("closed"); ticks(0.1, 6)
-    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3, not castAware's 2")
+    eq(WoW.cvars.cameraView, "3", "  own view the saved slot: the exit ends on view 3, not castAware's 2")
     lib, SC = castAwareOn("4", "2", { presentationViewSlot = 2 })
-    check(not hasCall("SaveView(2)"), "presentationViewSlot 2, own view 2: not saved into it")
     SC:Exit("closed"); ticks(0.1, 6)
-    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3")
-    lib, SC = castAwareOn("4", "3", { presentationViewSlot = 2 })
-    check(hasCall("SaveView(2)"), "presentationViewSlot 2, own view 3: saved in 2")
-    SC:ForceRestore()
+    eq(WoW.cvars.cameraView, "3", "  own view 2: the exit ends on view 3")
 end
 
-do  -- Saved slot 2 and castAware's 3: the fallback can't avoid both, so the
-    -- exit's view 3 isn't written (#66).
+do  -- The two slots on views 2 and 3, either way round: the exit ends on the
+    -- cast slot, never the saved one (Codex, PR #73).
     local lib, SC = castAwareOn("4", "2", { savedViewSlot = 2, presentationViewSlot = 3 })
-    check(not hasCall("SaveView(3)"), "savedViewSlot 2, presentationViewSlot 3, own view 2: not saved into the exit's view 3")
     SC:Exit("closed"); ticks(0.1, 6)
-    eq(WoW.cvars.cameraView, "3", "  the exit ends on view 3, never the saved slot")
-    -- The other way round (Codex, PR #73): saved 3, castAware's 2.
+    eq(WoW.cvars.cameraView, "3", "savedViewSlot 2, presentationViewSlot 3, own view 2: the exit ends on view 3")
     lib, SC = castAwareOn("4", "3", { savedViewSlot = 3, presentationViewSlot = 2 })
-    check(not hasCall("SaveView(2)"), "savedViewSlot 3, presentationViewSlot 2, own view 3: not saved into the exit's view 2")
     SC:Exit("closed"); ticks(0.1, 6)
-    eq(WoW.cvars.cameraView, "2", "  the exit ends on view 2, never the saved slot")
+    eq(WoW.cvars.cameraView, "2", "savedViewSlot 3, presentationViewSlot 2, own view 3: the exit ends on view 2")
+    check(not hasCall("SaveView"), "  no view saved")
 end
 
 do  -- #72: the capture in the db names castAware's slot, for the crash heal.
@@ -420,7 +438,8 @@ do  -- #72: without castAware, view 4 is the player's own choice: the exit ends 
     eq(WoW.cvars.cameraView, "4", "  the exit ends on the player's view 4")
 end
 
-do  -- #72: the crash heal reads the slot from the capture in the db.
+do  -- #72: the crash heal reads the slot from the capture in the db (an
+    -- older copy's capture: savedViewSlot, no viewSlot).
     local lib = freshLibrary()
     WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "4"
     local DB = { LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, view = 4, presentationViewSlot = 4 } }
@@ -435,16 +454,143 @@ do  -- #72: the crash heal reads the slot from the capture in the db.
     eq(WoW.cvars.cameraView, "4", "  without castAware's slot in the capture: onto the player's view 4")
 end
 
-do  -- Read at each Enter: the next presentation from another view saves again.
-    local lib, SC = castAwareOn("4", "4")
-    SC:ForceRestore()
-    WoW.cvars.cameraView = "3"
+------------------------------------------------------------------------------
+-- #75: the player's camera is saved only on Never, whose exit snaps back to
+-- it. The restore decides by the style at restore and whether this
+-- presentation saved: on a following style, or with nothing saved, the
+-- player's own view and zoom; on Never with a save, the exact snap-back.
+------------------------------------------------------------------------------
+local function presentOn(style, view, opts)
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, view
+    WoW.camera.savedViews[5] = 99   -- what an earlier copy left in view 5
+    opts = opts or {}
+    opts.owner = opts.owner or "AltStable"
+    local SC = lib:New(opts)
+    WoW.camera.zoom = 12
+    check(SC:Enter(newWindow("MEDIUM")), "presenting on style " .. style .. ", view " .. view)
+    ticks(0.1, 16)
+    return lib, SC
+end
+
+for _, style in ipairs({ "1", "2", "4" }) do
+    local lib, SC = presentOn(style, "3")
+    check(not hasCall("SaveView"), "style " .. style .. ": Enter saves no view")
+    eq(lib.state.cam.capture.savedViewSlot, nil, "  the capture says nothing was saved")
+    eq(lib.state.cam.capture.viewSlot, 5, "  and keeps the configured slot")
+    eq(WoW.camera.savedViews[5], 99, "  view 5 untouched")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on the player's view")
+end
+
+do  -- Never: exactly one save, at Enter, and the snap-back.
+    local lib, SC = presentOn("0", "3")
+    local n = 0
+    for _, c in ipairs(WoW.calls) do if c:find("^SaveView") then n = n + 1 end end
+    eq(n, 1, "Never: exactly one SaveView")
+    check(hasCall("SaveView(5)"), "  into the saved slot")
+    eq(lib.state.cam.capture.savedViewSlot, 5, "  and the capture says so")
     local from = #WoW.calls
-    SC:Enter(); ticks(0.1, 16)
-    local saved = false
-    for _, c in ipairs(callsSince(from)) do if c == "SaveView(4)" then saved = true end end
-    check(saved, "the next Enter from view 3 saves the settled view in 4")
-    SC:ForceRestore()
+    SC:Exit("closed")
+    local first
+    for _, c in ipairs(callsSince(from)) do if c:find("^SetView") then first = first or c end end
+    eq(first, "SetView(5)", "  the exit snaps back to it")
+    ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  cameraView written back")
+end
+
+do  -- Never at Enter, a SaveView that fails: nothing to snap back to, so the
+    -- player's own view and zoom.
+    local real = SaveView
+    rawset(_G, "SaveView", function() error("refused") end)
+    local lib, SC = presentOn("0", "3")
+    rawset(_G, "SaveView", real)
+    eq(lib.state.cam.capture.savedViewSlot, nil, "Never, SaveView failed: the capture says nothing was saved")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  the exit ends on the player's view")
+    check(not hasCall("SetView(5)"), "  never on the unsaved slot")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- Following at Enter, Never at the exit: nothing was saved, so the own
+    -- view and zoom, not view 5 (an earlier copy's write).
+    local lib, SC = presentOn("4", "3")
+    WoW.cvars.cameraSmoothStyle = "0"
+    SC:Exit("closed"); ticks(0.1, 6)
+    check(not hasCall("SetView(5)"), "following, then Never: never onto view 5")
+    eq(WoW.cvars.cameraView, "3", "  on the player's view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- Never at Enter, following at the exit: the own view (the save unused).
+    local lib, SC = presentOn("0", "3")
+    WoW.cvars.cameraSmoothStyle = "4"
+    local from = #WoW.calls
+    SC:Exit("closed"); ticks(0.1, 6)
+    local first
+    for _, c in ipairs(callsSince(from)) do if c:find("^SetView") then first = first or c end end
+    eq(first, "SetView(3)", "Never, then following: the exit ends on the player's view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- Switched during the exit animation, either way: the end of the exit
+    -- applies the destination that holds then.
+    local lib, SC = presentOn("4", "3")
+    SC:Exit("closed")
+    WoW.cvars.cameraSmoothStyle = "0"
+    local mid = #WoW.calls
+    ticks(0.1, 6)
+    local again = false
+    for _, c in ipairs(callsSince(mid)) do if c:find("^SetView") then again = true end end
+    check(not again, "following at Exit, Never at its end, nothing saved: the own view stands, no second SetView")
+    lib, SC = presentOn("0", "3")
+    SC:Exit("closed")
+    WoW.cvars.cameraSmoothStyle = "4"
+    ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "Never at Exit (snap-back), following at its end: the own view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- A forced restore and the crash heal take the same decision.
+    local lib, SC = presentOn("4", "3")
+    SC:ForceRestore("test")
+    check(not hasCall("SetView(5)"), "a forced restore, nothing saved: never onto view 5")
+    eq(WoW.cvars.cameraView, "3", "  the player's view")
+    -- A capture with nothing saved, healed on Never.
+    lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "0", "2"
+    lib:New({ owner = "A", db = { LibShowcaseCapture = { viewSlot = 5, zoom = 12, view = 3 } } })
+    WoW.fire("PLAYER_LOGIN")
+    check(not hasCall("SetView(5)"), "the heal on Never, nothing saved: never onto view 5")
+    eq(WoW.cvars.cameraView, "3", "  the player's view")
+    -- An older copy's capture (savedViewSlot), healed on Never: the snap-back.
+    lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "0", "2"
+    lib:New({ owner = "A", db = { LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, view = 3 } } })
+    WoW.fire("PLAYER_LOGIN")
+    check(hasCall("SetView(5)"), "an older copy's capture on Never: the snap-back")
+    eq(WoW.cvars.cameraView, "3", "  then cameraView written back")
+    -- An older copy's capture from its saved slot, healed on a following
+    -- style: its savedViewSlot is the configured slot, so the fallback (the
+    -- login repair already done, so it can't hide this).
+    lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
+    lib:New({ owner = "A", db = { LibShowcaseViewRepaired = true,
+        LibShowcaseCapture = { savedViewSlot = 5, zoom = 12, view = 5 } } })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "an older copy's capture taken on its slot 5, healed on a following style: view 2")
+end
+
+do  -- A consumer's own slot (AltStable's 2 and 3): nothing saved on a
+    -- following style, the fallback rules as before.
+    local lib, SC = presentOn("4", "2", { savedViewSlot = 2 })
+    check(not hasCall("SaveView"), "savedViewSlot 2: no view saved")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "  own view 2, the slot: the exit ends on view 3")
+    lib, SC = presentOn("0", "4", { savedViewSlot = 3 })
+    check(hasCall("SaveView(3)"), "savedViewSlot 3 on Never: saved into 3")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "4", "  the snap-back, then cameraView written back to the player's 4")
 end
 
 ------------------------------------------------------------------------------
@@ -461,7 +607,7 @@ do
     local SC = lib:New({ owner = "A", zoom = 99, savedViewSlot = 9, enterDuration = 0 })
     SC:Enter()
     eq(WoW.camera.zoom, 18, "zoom clamped to 18")
-    eq(WoW.camera.savedViews[5] ~= nil, true, "savedViewSlot clamped to 5")
+    eq(lib.state.cam.cfg.savedViewSlot, 5, "savedViewSlot clamped to 5")
     eq(lib.state.cam.cfg.enterDuration, 0.35, "enterDuration clamped")
     SC:ForceRestore()
     SC.opts.zoom = 3
@@ -486,6 +632,7 @@ for _, case in ipairs({ { "90", 180 / 90 }, { "180", 1 }, { "360", 180 / 360 }, 
     local want = -(0.005 * case[2])
     eq(WoW.camera.yaw, want, "cameraYawMoveSpeed " .. case[1] .. ": the settled orbit at orbitSpeed scaled by " .. case[2])
     WoW.fire("UNIT_SPELLCAST_START", "player")
+    ticks(0.1, 5)   -- the reset swing (#75)
     WoW.fire("UNIT_SPELLCAST_STOP", "player")
     eq(WoW.camera.yaw, want, "  and the orbit a cast's end resumes")
     SC:ForceRestore()
@@ -503,6 +650,7 @@ do
     ticks(0.1, 13)
     eq(WoW.camera.yaw, -0.005, "changed to 180 during the entry: the orbit starts at 180's speed, not 90's")
     WoW.fire("UNIT_SPELLCAST_START", "player")
+    ticks(0.1, 5)   -- the reset swing (#75)
     WoW.cvars.cameraYawMoveSpeed = "360"
     WoW.fire("UNIT_SPELLCAST_STOP", "player")
     eq(WoW.camera.yaw, -0.0025, "changed to 360 during a cast: its end resumes at 360's speed")

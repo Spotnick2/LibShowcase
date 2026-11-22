@@ -2150,8 +2150,8 @@ local function R13Settled()
     end
     local cam = lib().state.cam
     if cam.mode == "enter" then return false, "entering" end
-    return R13Observe("settle", cam.presentationViewSaved == false,
-        ("settled: presentationViewSaved %s (want false: nothing saved into view 4)"):format(tostring(cam.presentationViewSaved)))
+    return R13Observe("settle", cam.presentationViewSaved ~= true,
+        ("settled: presentationViewSaved %s (want not true: nothing saved into view 4)"):format(tostring(cam.presentationViewSaved)))
 end
 
 -- The library's handler and this one run in no set order: the mode is read
