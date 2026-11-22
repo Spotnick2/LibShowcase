@@ -637,6 +637,18 @@ do  -- An instance created after login repairs at New.
     eq(DB.LibShowcaseViewRepaired, true, "  marked")
 end
 
+do  -- #67: a slot set in inst.opts after New, before PLAYER_LOGIN (AltStable's
+    -- ADDON_LOADED), is the one the repair compares with.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local DB = {}
+    local SC = lib:New({ owner = "A", db = function() return DB end })
+    SC.opts.savedViewSlot = 3
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "savedViewSlot 3 set before PLAYER_LOGIN, on view 3: back to view 2")
+    eq(DB.LibShowcaseViewRepaired, true, "  marked")
+end
+
 do  -- savedViewSlot 2: the repair goes to view 3, not the slot it leaves.
     local lib = freshLibrary()
     WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
