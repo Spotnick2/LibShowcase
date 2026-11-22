@@ -279,7 +279,7 @@ end
 -- wrapped to count its calls (mark), which is what tells the newer code from
 -- the release's.
 ------------------------------------------------------------------------------
-local RELEASES = { 3, 4, 10, 12, 14 }
+local RELEASES = { 3, 4, 10, 12, 14, 15 }
 local function sameCVars(a, b)
     for k, v in pairs(a) do if b[k] ~= v then return false, k end end
     for k, v in pairs(b) do if a[k] ~= v then return false, k end end

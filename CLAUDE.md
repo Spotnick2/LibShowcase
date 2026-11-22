@@ -12,7 +12,9 @@ takes PortalRoulette's `Camera/CameraMode.lua` extras as opt-in options.
 Players never install it: each addon embeds a copy under `Libs\LibShowcase-1.0\` through
 `.pkgmeta` externals, and LibStub runs the newest copy loaded.
 
-**Status (2026-11-22): `r14` released** (MINOR 14, annotated tag on `6ac0fca`: with castAware
+**Status (2026-11-22): `r15` released** (MINOR 15, annotated tag on `4f33c51`: no camera view
+written on a style that follows, the player's camera saved only on Never, castAware casts take the
+reset swing, #75. r14 on `6ac0fca`: with castAware
 the exit doesn't end on its slot, view 4, which stops following once written, #72; castAware
 saves nothing into the player's own view, #66, MINOR 13, never tagged on its own; the login
 repair's slot timing documented, #67. r12 on `2638a91`: the exit ends
@@ -23,7 +25,7 @@ countdowns, orbit speed, female framing, combat start, gamepad mode, #42, #40, #
 #14/#15; r3 on `283914d`; r1 and r2 were never tagged), public at
 github.com/Spotnick2/LibShowcase (it must stay **public**: the packager clones externals
 anonymously). MIT. Consumers (the `.pkgmeta` pin in their last release): **AltStable**
-(`tag: r10`; its `main` pins r12), **PortalRoulette** (`tag: r10`; its PR #40 moves to r14) and
+(`tag: r10`; its `main` pins r12), **PortalRoulette** (`tag: r14`, v1.2.2) and
 **123** (`tag: r4`, `NEEDS_MINOR = 4`: it uses `hideWorldNames`; r12 is Spotnick2/123#64). `docs/DESIGN.md` is the design. Work goes through GitHub issues and pull
 requests here.
 
@@ -107,7 +109,7 @@ consumer's tests against this checkout (`$env:LIBSHOWCASE = 'C:\Projects\WoW\Lib
 `pwsh ..\AltStable\tests\run.ps1`, `pwsh ..\PortalRoulette\tests\run.ps1`, and
 `pwsh tests\run.ps1` from `..\123`) and an in-game check. After tagging: freeze the release,
 whole, as `tests/fixtures/LibShowcase-rN/` and add N to `RELEASES` in `tests/test_upgrade.lua`
-(r3: #10; r4: #16; r10: #60; r12: #65; r14: #74), and publish a GitHub Release for the tag (#13):
+(r3: #10; r4: #16; r10: #60; r12: #65; r14: #74; r15: #79), and publish a GitHub Release for the tag (#13):
 `gh release create rN --verify-tag --latest --title "rN: <what changed>" --notes-file <notes>`.
 The notes are written by hand, not generated: **the MINOR** first, what changed, whether a
 consumer must do anything (nothing / pin `tag: rN` **and raise its `NEEDS_MINOR`** to use what is
