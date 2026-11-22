@@ -1242,6 +1242,72 @@ S.Answer(false); S.Next()
 eq(rec.results[13].check, "FAIL", "view4 13: the saved setup skipped in this run: FAIL")
 check(tostring(rec.results[13].detail):find("set nil", 1, true), "  no setup recorded in this run")
 fp("steps stop")
+
+-- Can view 4 be cleared, and does a cleared view 4 follow (#75).
+do
+    local errs9 = #errors
+    local had = rawget(_G, "C_CVar")
+    local sets = {}
+    rawset(_G, "C_CVar", {
+        SetCVar = function(name, value) sets[#sets + 1] = name .. "=" .. tostring(value); return true end,
+        GetCVarInfo = function(name) return nil end,
+        GetCVarDefault = function() return nil end,
+    })
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    WoW.camera.savedViews[4] = 9
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next()
+    check(tostring(rec.results[2].detail):find("start: cameraView 3; cameraDistanceD: GetCVar", 1, true), "view4clear 2: view 4's CVars read")
+    S.Run()
+    eq(WoW.cvars.cameraView, "2", "view4clear 3: the control on view 2")
+    S.Answer(true)
+    S.Run()
+    eq(WoW.camera.savedViews[4], nil, "view4clear 5: ResetView(4)")
+    eq(table.concat(sets, ","), "cameraDistanceD=nil,cameraPitchD=nil,cameraYawD=nil", "  each CVar set with no value")
+    check(tostring(rec.results[5].detail):find("C_CVar.SetCVar(cameraYawD) -> true", 1, true), "  each result logged")
+    S.Next()   -- the /reload
+    check(tostring(rec.results[7].detail):find("after the /reload: cameraView 2", 1, true), "view4clear 7: read after the /reload")
+    S.Run()
+    eq(WoW.cvars.cameraView, "4", "view4clear 8: on view 4")
+    S.Answer(true); S.Next()
+    eq(rec.results[11].check, "PASS", "view4clear 11: still view 4 after the /reload, a clear attempted in this run")
+    check(tostring(rec.results[11].detail):find("setters accepted 3 of 3", 1, true), "  with the setters' answers")
+    S.Answer(true)
+    eq(rec.status, "done", "the view4clear procedure finishes")
+    eq(WoW.cvars.cameraView, "2", "  back on view 2")
+    eq(#errors - errs9, 0, "  no refusal")
+    -- A second run with the clear skipped: the read can't borrow the first's.
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next(); S.Run(); S.Answer(true)
+    S.Skip()   -- the clear
+    S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
+    eq(rec.results[11].check, "FAIL", "view4clear 11: no clear in this run: FAIL")
+    fp("steps stop")
+    -- Setters that refuse (MEASURED run #611: nil) are reported as such.
+    C_CVar.SetCVar = function() return nil end
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next(); S.Run(); S.Answer(true); S.Run()
+    check(tostring(rec.results[5].detail):find("C_CVar.SetCVar(cameraDistanceD) -> nil", 1, true), "view4clear 5: a setter's nil logged")
+    S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
+    check(tostring(rec.results[11].detail):find("setters accepted 0 of 3", 1, true), "view4clear 11: none accepted, said so")
+    fp("steps stop")
+    -- A refused start, then skipped: an earlier run's marker doesn't survive.
+    LibShowcaseProbeDB.view4clear = { attempted = true, accepted = 3 }
+    WoW.cvars.cameraSmoothStyle = "0"
+    fp("steps ls view4clear")
+    rec = record("view4clear")
+    S.Next()
+    eq(rec.at, 2, "view4clear 2: refused on Never")
+    eq(LibShowcaseProbeDB.view4clear.attempted, nil, "  the earlier run's marker already gone")
+    WoW.cvars.cameraSmoothStyle = "4"
+    S.Skip(); S.Run(); S.Answer(true); S.Skip(); S.Next(); S.Next(); S.Run(); S.Answer(false); S.Next()
+    eq(rec.results[11].check, "FAIL", "view4clear 11: start and clear skipped: FAIL")
+    fp("steps stop")
+    rawset(_G, "C_CVar", had)
+end
 -- Below MINOR 14: the start refuses.
 do
     local realGet = LibStub.GetLibrary

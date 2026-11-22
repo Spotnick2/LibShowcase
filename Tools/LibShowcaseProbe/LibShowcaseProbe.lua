@@ -47,6 +47,9 @@
 --             too, view 4 untouched
 --   view4     does view 4 follow: at its default, and after SaveView(4) from
 --             view 2 then SetView(4), each across a /reload (#66, run #601)?
+--   view4clear can addon code clear view 4 (ResetView, then C_CVar.SetCVar
+--             with no value on cameraDistanceD/PitchD/YawD), and does a
+--             cleared view 4 follow, also after a /reload (#75)?
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -2336,6 +2339,118 @@ do
         run = function() return SVCall("ResetView", 4, "SetView", 2) end }
     Probe:Steps("view4", steps)
 end
+
+-- 23. Can addon code clear view 4, and does a cleared view 4 follow (#75)?
+-- Both accounts' config-cache.wtf keep view 4 (cameraDistanceD, cameraPitchD,
+-- cameraYawD); SPOTNICK3's still held the probe's SaveView(4) after
+-- castview's ResetView(4) and a /reload (2026-11-22, 15:57). So ResetView
+-- resets the view for the session only, which fits view4's run #605: view 4
+-- at its default followed, then not after a /reload. This tries the CVar
+-- route: C_CVar.SetCVar(name) with no value on each of view 4's three CVars,
+-- after ResetView(4), each result logged. After the /reload the session
+-- reads config-cache.wtf itself: if the D lines are gone, the clear worked,
+-- and the view 4 trial is a never-written view 4. View 2 is the control.
+local VIEW4_CVARS = { "cameraDistanceD", "cameraPitchD", "cameraYawD" }
+local V4C = { obs = {} }
+
+local function V4CInfo(name)
+    local c = G("C_CVar")
+    local ok, v = pcall(GetCVar, name)
+    local parts = { "GetCVar " .. (ok and tostring(v) or "error") }
+    if type(c) == "table" and type(c.GetCVarInfo) == "function" then
+        local p = { pcall(c.GetCVarInfo, name) }
+        parts[#parts + 1] = p[1] and ("GetCVarInfo value %s, default %s, account %s, character %s, readOnly %s")
+            :format(tostring(p[2]), tostring(p[3]), tostring(p[4]), tostring(p[5]), tostring(p[8]))
+            or ("GetCVarInfo error " .. tostring(p[2]))
+    end
+    return name .. ": " .. table.concat(parts, "; ")
+end
+
+local function V4CRead(tag)
+    local lines = {}
+    for _, name in ipairs(VIEW4_CVARS) do lines[#lines + 1] = V4CInfo(name) end
+    local line = ("%s: cameraView %s; %s"):format(tag, tostring(GetCVar("cameraView")), table.concat(lines, " ~ "))
+    say("== view4clear " .. line)
+    return line
+end
+
+-- The run's state is reset before any guard: a refused start that is then
+-- skipped can't leave an earlier run's marker (Codex, PR #76).
+local function V4CStart()
+    LibShowcaseProbeDB.view4clear, V4C.obs = {}, {}
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s (%s), which never follows: set it to Only when moving"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
+    end
+    return V4CRead("start")
+end
+
+-- ResetView(4) while on view 2, then each CVar set with no value (the
+-- client's default, if it takes one), each result logged. Recorded as an
+-- attempt with the setters' answers: only the cache on disk, read by the
+-- session, confirms a clear (Codex, PR #76). MEASURED 71037 (run #611):
+-- each setter returned nil, and config-cache.wtf kept view 4.
+local function V4CClear()
+    if tostring(GetCVar("cameraView")) == "4" then pcall(SetView, 2) end
+    local done = {}
+    local ok, err = pcall(ResetView, 4)
+    done[#done + 1] = "ResetView(4) " .. (ok and "ok" or ("error " .. tostring(err)))
+    local c = G("C_CVar")
+    local accepted = 0
+    for _, name in ipairs(VIEW4_CVARS) do
+        if type(c) == "table" and type(c.SetCVar) == "function" then
+            local p = { pcall(c.SetCVar, name) }
+            if p[1] and p[2] == true then accepted = accepted + 1 end
+            done[#done + 1] = ("C_CVar.SetCVar(%s) %s"):format(name, p[1] and ("-> " .. tostring(p[2])) or ("error " .. tostring(p[2])))
+        else
+            done[#done + 1] = "C_CVar.SetCVar missing"
+        end
+    end
+    LibShowcaseProbeDB.view4clear = LibShowcaseProbeDB.view4clear or {}
+    LibShowcaseProbeDB.view4clear.attempted, LibShowcaseProbeDB.view4clear.accepted = true, accepted
+    say("== view4clear " .. table.concat(done, "; "))
+    return table.concat(done, "; ") .. " ~~ " .. V4CRead("after")
+end
+
+local function V4CReadView()
+    local view = tostring(GetCVar("cameraView"))
+    local run = type(LibShowcaseProbeDB.view4clear) == "table" and LibShowcaseProbeDB.view4clear or {}
+    -- PASS: still on view 4 after a clear attempt in this run. Whether the
+    -- clear took is the setters' answer here, and the cache on disk.
+    V4C.obs.reload = { run.attempted == true and view == "4",
+        ("after the /reload: cameraView %s (want 4); clear attempted in this run %s, setters accepted %s of 3")
+            :format(view, tostring(run.attempted == true), tostring(run.accepted or 0)) }
+    say("== view4clear " .. V4C.obs.reload[2])
+    return true, V4C.obs.reload[2]
+end
+
+Probe:Steps("view4clear", {
+    title = "Can view 4 be cleared, and does a cleared view 4 follow (#75)",
+    { text = "Mouse and keyboard, out of combat, room to walk, Camera Following Style Only when moving. Every question"
+        .. " is the same test: " .. SV_ASK .. " View 2 first (the control, it should follow), then the probe tries to"
+        .. " clear your saved view 4, a /reload, then view 4. Answer each as you see it; a no is as useful as a yes."
+        .. " (This resets your view 4.)" },
+    { text = "Checking the style and reading view 4's CVars.", auto = true, run = V4CStart },
+    { text = "The control: SetView(2).", button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+    { text = "On view 2 (the control; it should follow): " .. SV_ASK, ask = true },
+    { text = "Clear view 4: ResetView(4), then view 4's three CVars set to the client's default.", button = "Clear view 4",
+      run = V4CClear },
+    { text = "Type /reload: the client writes its cache (the session reads it afterwards).", reload = true },
+    { text = "Reading view 4's CVars after the /reload.", auto = true, run = function() return V4CRead("after the /reload") end },
+    { text = "SetView(4): the cleared view 4.", button = "SetView(4)", run = function() return SVCall("SetView", 4) end },
+    { text = "On the cleared view 4: " .. SV_ASK, ask = true },
+    { text = "Type /reload: does it last?", reload = true },
+    { text = "Reading the view after the /reload.", auto = true, run = V4CReadView,
+      check = function()
+          local v = V4C.obs.reload
+          if not v then return false, "reload: not read" end
+          return v[1], v[2]
+      end },
+    { text = "After the /reload, on view 4: " .. SV_ASK, ask = true },
+    { text = "Back to view 2.", auto = true, run = function() return SVCall("SetView", 2) end },
+})
 
 ----------------------------------------------------------------------------
 -- Load
