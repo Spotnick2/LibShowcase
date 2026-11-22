@@ -33,6 +33,12 @@
 --             again, and after a /reload (#51)?
 --   tempcvar  the library's SetCVar over the gamepad's temp values on the
 --             centring CVars: what does each layer read, and what is left (#51)?
+--   savedview saved view 5 on mouse and keyboard: the reporter's ResetView(5),
+--             the library's SaveView/SetView calls, each across a /reload:
+--             does the camera swing back behind a walking character (#51)?
+--   viewfix   three ways out of saved view 5, each from the exit's stuck state:
+--             ResetView(5), the cameraView CVar, SetView and the zoom: does
+--             the camera jump, follow, and still follow after a /reload (#51)?
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -1644,6 +1650,279 @@ Probe:Steps("rereg", {
     { text = "Putting the CVar back.", auto = true, run = RestoreAll },
     { text = "Type /reload: it clears the handler this procedure registered.", reload = true },
 })
+
+-- 18. #51, saved view 5. The reporter (keyboard, no other camera addon, r4)
+-- fixes the camera with /run ResetView(5), and the bug is back at every login
+-- and /reload. Enter's SaveView(5) and Exit's SetView(5) leave a player on
+-- saved view 5, and the client keeps cameraView "5" and that view's
+-- cameraDistanceE / cameraPitchE in config-cache.wtf (both of the owner's
+-- accounts, 2026-11-22). The follow and view runs asked about turning with
+-- A/D, which turns the camera with the character whatever the view; the
+-- reporter's symptom is a camera that stays where the mouse left it, so each
+-- question here tests exactly that. One call per step, the views read after.
+local VIEW_LETTERS = { "A", "B", "C", "D", "E" }
+local SV_ASK = "Drag the camera to one side with the left mouse button, let go, then walk straight forward with W"
+    .. " for a few seconds (no mouse, no turning). Does the camera swing back behind the character on its own?"
+
+local function CVarDefault(name)
+    local c = G("C_CVar")
+    if type(c) ~= "table" or type(c.GetCVarDefault) ~= "function" then return nil end
+    local ok, d = pcall(c.GetCVarDefault, name)
+    return ok and d or nil
+end
+
+local function SameValue(a, b)
+    if tonumber(a) and tonumber(b) then return math.abs(tonumber(a) - tonumber(b)) < 0.0005 end
+    return tostring(a) == tostring(b)
+end
+
+-- Every saved view's distance, pitch and yaw that differs from its default
+-- (cameraDistanceA..E, cameraPitchA..E, cameraYawA..E; views 1 to 5).
+-- Run #567 read none that differed, while config-cache.wtf kept
+-- cameraDistanceE and cameraPitchE: the count of readable ones says whether
+-- GetCVar sees them at all.
+local function SavedViews()
+    local parts, readable = {}, 0
+    for i, letter in ipairs(VIEW_LETTERS) do
+        local view = {}
+        for _, what in ipairs({ "Distance", "Pitch", "Yaw" }) do
+            local name = "camera" .. what .. letter
+            local ok, v = pcall(GetCVar, name)
+            if ok and v ~= nil then
+                readable = readable + 1
+                local d = CVarDefault(name)
+                if d == nil or not SameValue(v, d) then
+                    view[#view + 1] = ("%s %s (default %s)"):format(what:lower(), tostring(v), tostring(d))
+                end
+            end
+        end
+        if #view > 0 then parts[#parts + 1] = ("view %d: %s"):format(i, table.concat(view, ", ")) end
+    end
+    local tail = (" (%d of 15 readable)"):format(readable)
+    return (#parts > 0 and table.concat(parts, "; ") or "every readable saved view at its default") .. tail
+end
+
+-- Any style but Never (0) follows while moving. The dropdown (the owner's
+-- screenshot, 2026-11-22; Blizzard_SettingsDefinitions_Frame/Controls.lua)
+-- lists 1 "Only horizontal when moving", 4 "Only when moving" (the client's
+-- default), 2 "Always adjust camera", 0 "Never adjust camera". Run #567 on 4
+-- read "no" on view 2 too, where run #572 on 2 read "yes": the style matters,
+-- so each read names it.
+local FOLLOWING_STYLES = { ["1"] = true, ["2"] = true, ["4"] = true }
+local STYLE_NAMES = { ["0"] = "Never adjust camera", ["1"] = "Only horizontal when moving",
+    ["2"] = "Always adjust camera", ["4"] = "Only when moving" }
+
+local function SVRead(tag)
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    local line = ("%s: cameraView %s, cameraSmoothStyle %s (%s), GamePadEnable %s; %s"):format(tag,
+        tostring(GetCVar("cameraView")), style, STYLE_NAMES[style] or "?",
+        tostring(GetCVar("GamePadEnable")), SavedViews())
+    say("== savedview " .. line)
+    return line
+end
+
+-- r12's login repair (#51) moves a player found on view 5 to view 2, once per
+-- consumer db, at the first login on a following style. These procedures
+-- /reload on view 5 on purpose, so they start only once every loaded
+-- instance's db has had it (the newest copy runs every consumer's instance;
+-- Codex, PR #62). Nil when none is pending, or before r12.
+local function RepairPending()
+    local L = lib()
+    local key = L.VIEW_REPAIR_DB_KEY
+    if not key or type(L.impl) ~= "table" or type(L.impl.DB) ~= "function" then return nil end
+    local pending = {}
+    for _, inst in ipairs(L.instances or {}) do
+        local ok, db = pcall(L.impl.DB, inst)
+        if ok and type(db) == "table" and not db[key] then pending[#pending + 1] = tostring(inst.owner) end
+    end
+    return #pending > 0 and table.concat(pending, ", ") or nil
+end
+
+local function RefuseRepairPending()
+    local pending = RepairPending()
+    if pending then
+        error(("the library's login repair (#51) hasn't run yet for %s: it would move you off view 5 at a"
+            .. " /reload. Type /reload once on your own view (not 5) with this following style, then Retry"):format(pending), 0)
+    end
+end
+
+local function SVStart()
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
+    end
+    RefuseRepairPending()
+    return SVRead("start")
+end
+
+-- Each call in turn (a name and its view number), then the views read.
+local function SVCall(...)
+    local calls, n = {}, select("#", ...)
+    for i = 1, n, 2 do
+        local name, slot = select(i, ...)
+        local f = G(name)
+        if type(f) ~= "function" then error(name .. " is missing", 0) end
+        local ok, err = pcall(f, slot)
+        if not ok then error(("%s(%d) failed: %s. Retry"):format(name, slot, tostring(err)), 0) end
+        calls[#calls + 1] = ("%s(%d)"):format(name, slot)
+    end
+    return SVRead("after " .. table.concat(calls, ", "))
+end
+
+Probe:Steps("savedview", {
+    title = "Saved view 5 and a camera that stays put (#51)",
+    { text = "Mouse and keyboard (no gamepad), out of combat, somewhere open with room to walk. Set Camera Following"
+        .. " Style to the one to test (Options > Controls > Camera; not Never). Every question is the same test: " .. SV_ASK
+        .. " Watch for that each time: a camera that stays where you left it is the bug. This resets your saved"
+        .. " view 5 (the library has already overwritten it)." },
+    { text = "Reading the view and the saved views.", auto = true, run = SVStart },
+    -- The reporter's state, set up here whatever the start: r12's login
+    -- repair may already have moved this account off view 5 (Codex, PR #62).
+    { text = "Get stuck saves the camera into view 5 and puts it back with SetView(5), as an exit before r12 did.",
+      button = "Get stuck", run = function() return SVCall("SaveView", 5, "SetView", 5) end },
+    { text = "Stuck: " .. SV_ASK, ask = true },
+    -- The reporter's fix, and whether it lasts.
+    { text = "ResetView(5) is the reporter's fix.", button = "ResetView(5)", run = function() return SVCall("ResetView", 5) end },
+    { text = "After ResetView(5): " .. SV_ASK, ask = true },
+    { text = "Type /reload: does the fix last?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload after ResetView(5)") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    -- The library's view calls, from a player who never ran a presentation.
+    { text = "SetView(2) puts you on the default view, where a player starts who never ran a presentation.",
+      button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+    { text = "On view 2: " .. SV_ASK, ask = true },
+    { text = "Walk a little so the camera is behind you. Enter's view calls: SaveView(5), then SetView(2) (no zoom or turn here).",
+      button = "Enter's calls", run = function() return SVCall("SaveView", 5, "SetView", 2) end },
+    { text = "After Enter's calls: " .. SV_ASK, ask = true },
+    { text = "The exit ends on SetView(5).", button = "SetView(5)", run = function() return SVCall("SetView", 5) end },
+    { text = "After the exit's SetView(5): " .. SV_ASK, ask = true },
+    { text = "Type /reload, as a player's next login or /reload.", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload on view 5") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    -- A candidate fix: back on the player's own view, saved view 5 left as is.
+    { text = "SetView(2) goes back to the view the player started on, and leaves saved view 5 as the exit left it.",
+      button = "SetView(2)", run = function() return SVCall("SetView", 2) end },
+    { text = "Back on view 2: " .. SV_ASK, ask = true },
+    { text = "Type /reload: does that last?", reload = true },
+    { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload on view 2") end },
+    { text = "After the /reload: " .. SV_ASK, ask = true },
+    { text = "Cleaning up: ResetView(5) clears the saved view this test wrote; you stay on view 2.", auto = true,
+      run = function() return SVCall("ResetView", 5) end },
+})
+
+-- 19. #51, the way out. MEASURED (savedview, runs #572 to #575, Always): the
+-- camera follows on view 2, also after SaveView(5); SetView(5) onto the saved
+-- view stops it, and it stays stopped after a /reload; SetView(2) brings it
+-- back for good. The exit's SetView(5) is what puts the player's camera back
+-- where it was, so each candidate starts from that stuck state and is judged
+-- on three things: does the camera jump, does it follow, and after a /reload?
+--   reset  ResetView(5) while on view 5 (the reporter's macro)
+--   cvar   SetCVar("cameraView", the start's view): the index only
+--   view   SetView(the start's view), then the zoom put back
+local VF = { zoom = nil, at = nil, before = nil }
+
+local function VFStart()
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s (%s), which never follows: set it to the style to test"
+            .. " (Options > Controls > Camera), then Retry"):format(style, STYLE_NAMES[style] or "unknown"), 0)
+    end
+    RefuseRepairPending()
+    local v = tostring(GetCVar("cameraView"))
+    if v == "5" then error("on view 5 already: the start needs your own view. Type /run SetView(2), then Retry", 0) end
+    LibShowcaseProbeDB.viewfix = { view = v }
+    return SVRead("start")
+end
+
+local function VFView()
+    local db = type(LibShowcaseProbeDB.viewfix) == "table" and LibShowcaseProbeDB.viewfix or {}
+    return tonumber(db.view) or 2
+end
+
+-- The exit's state: the camera saved into view 5, then put back by SetView(5).
+local function VFStuck()
+    VF.zoom = tonumber(GetCameraZoom())
+    local line = SVCall("SaveView", 5, "SetView", 5)
+    return ("%s; zoom %s"):format(line, tostring(VF.zoom))
+end
+
+-- C puts back the zoom read just before its button, not Get stuck's: the step
+-- asks for a zoom-out in between (Codex, PR #62).
+local function VFTry(how)
+    local zoomBefore = tonumber(GetCameraZoom())
+    local before = ("view %s, zoom %s"):format(tostring(GetCVar("cameraView")), tostring(zoomBefore))
+    local back = VFView()
+    if how == "reset" then
+        ResetView(5)
+    elseif how == "cvar" then
+        SetCVar("cameraView", tostring(back))
+    else
+        local zoom = zoomBefore
+        SetView(back)
+        local now = tonumber(GetCameraZoom()) or zoom
+        if zoom and now and math.abs(zoom - now) > 0.001 then
+            if zoom > now then CameraZoomOut(zoom - now) else CameraZoomIn(now - zoom) end
+        end
+    end
+    VF.at, VF.before = GetTime(), zoomBefore
+    return SVRead(("%s (from %s); zoom now %s"):format(how, before, tostring(GetCameraZoom())))
+end
+
+-- The zoom once the view's blend and the zoom have settled: the read right
+-- after SetView is the view's own (5.55, runs #577 to #590).
+local VF_SETTLE = 2
+local function VFSettled()
+    if not VF.at then return true, "no candidate pressed in this session" end
+    if GetTime() - VF.at < VF_SETTLE then return false, "settling" end
+    local line = ("settled: zoom %s (before the button %s), cameraView %s"):format(tostring(GetCameraZoom()),
+        tostring(VF.before), tostring(GetCVar("cameraView")))
+    say("  viewfix " .. line)
+    VF.at = nil
+    return true, line
+end
+
+local VF_JUMP = "Did the camera jump or move when you pressed it (say how in the Note box)?"
+
+local function VFCandidate(label, how, what)
+    return {
+        { text = ("%s. Get stuck saves the camera into view 5 and puts it back with SetView(5), as an exit does.")
+            :format(label), button = "Get stuck", run = VFStuck },
+        { text = "Stuck (the control, it shouldn't): " .. SV_ASK, ask = true },
+        { text = ("Zoom out a little and drag the camera to look at the character from the side, leave it there, then"
+            .. " press the button: %s"):format(what), button = label, run = function() return VFTry(how) end },
+        { text = "Reading the zoom once the camera has settled (2 seconds).", timeout = 10, wait = VFSettled },
+        { text = VF_JUMP, ask = true },
+        { text = "Now: " .. SV_ASK, ask = true },
+        { text = "Type /reload: does it last?", reload = true },
+        { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload after " .. how) end },
+        { text = "After the /reload: " .. SV_ASK, ask = true },
+    }
+end
+
+do
+    local steps = {
+        title = "The way out of saved view 5 (#51)",
+        { text = "Mouse and keyboard, out of combat, room to walk, Camera Following Style the one to test (not Never). Three"
+            .. " candidates, each"
+            .. " from the stuck state an exit leaves. For each one, watch two things: whether the camera JUMPS when you"
+            .. " press its button (the best one leaves it exactly where it was), and whether it then follows: " .. SV_ASK },
+        { text = "Reading the view (it must be your own, not 5).", auto = true, run = VFStart },
+    }
+    local candidates = {
+        { "A: ResetView(5)", "reset", "ResetView(5) on the saved view (the reporter's macro)." },
+        { "B: the CVar", "cvar", "only the cameraView CVar written back to your own view." },
+        { "C: SetView", "view", "SetView back to your own view, then the zoom put back." },
+    }
+    for _, c in ipairs(candidates) do
+        for _, s in ipairs(VFCandidate(c[1], c[2], c[3])) do steps[#steps + 1] = s end
+    end
+    steps[#steps + 1] = { text = "Cleaning up: ResetView(5), then SetView back to your own view.", auto = true,
+        run = function() return SVCall("ResetView", 5, "SetView", VFView()) end }
+    Probe:Steps("viewfix", steps)
+end
 
 ----------------------------------------------------------------------------
 -- Load

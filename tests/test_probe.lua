@@ -868,6 +868,149 @@ eq(rec.status, "done", "an orbitspeed run with both turns skipped")
 check(tostring(rec.results[5].detail):find("not measured: both turns must be timed in this run", 1, true),
       "  is not measured, whatever an earlier run timed")
 
+-- #51, saved view 5: the reporter's ResetView(5), then the library's view
+-- calls, each read back with the saved views that differ from their default.
+-- ResetView, SaveView, SetView and C_CVar.GetCVarDefault are in the 70959 dump.
+local hadCVar2 = rawget(_G, "C_CVar")
+local defaults = { cameraView = "2", cameraDistanceE = "15", cameraPitchE = "10", cameraDistanceD = "15" }
+rawset(_G, "C_CVar", { GetCVarDefault = function(name) return defaults[name] end })
+WoW.cvars.cameraView, WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE = "5", "8.979999", "10.000000"
+WoW.cvars.cameraDistanceD = "15"
+local errs4 = #errors
+local style2 = 1
+rawset(_G, "C_InputInterfaceStyle", { GetCurrentStyle = function() return style2 end })
+fp("steps ls savedview")
+rec = record("savedview")
+S.Next()
+eq(rec.at, 2, "savedview 2: refused in gamepad mode")
+style2 = 0
+WoW.cvars.cameraSmoothStyle = "0"
+S.Run()
+eq(rec.at, 2, "savedview 2: refused on Never (0)")
+check(logHas("Camera Following Style is 0 (Never adjust camera), which never follows"), "  saying why")
+WoW.cvars.cameraSmoothStyle = "2"
+-- r12's login repair not yet run for a db: it would undo a /reload on view 5
+-- (Codex, PR #62).
+LibShowcaseProbeDB.LibShowcaseViewRepaired = nil
+S.Run()
+eq(rec.at, 2, "savedview 2: refused while the login repair is pending")
+check(logHas("the library's login repair (#51) hasn't run yet for LibShowcaseProbe"), "  naming the instance")
+LibShowcaseProbeDB.LibShowcaseViewRepaired = true
+-- As if r12's repair had run at this login: off view 5, the flag set. The
+-- procedure gets stuck on its own (Codex, PR #62).
+WoW.cvars.cameraView = "2"
+S.Run()
+local start = tostring(rec.results[2].detail)
+check(start:find("start: cameraView 2", 1, true), "savedview 2: the view read")
+check(start:find("view 5: distance 8.979999 (default 15)", 1, true), "  and saved view 5's non-default distance")
+check(not start:find("pitch", 1, true) and not start:find("view 4", 1, true), "  only what differs from the default")
+check(start:find("(3 of 15 readable)", 1, true), "  with how many GetCVar sees")
+local from = #WoW.calls
+S.Run()
+eq(WoW.calls[from + 1], "SaveView(5)", "savedview 3: stuck, SaveView(5)")
+eq(WoW.cvars.cameraView, "5", "  then SetView(5), whatever the start")
+S.Answer(false)
+WoW.camera.savedViews[5] = 12
+S.Run()
+eq(WoW.camera.savedViews[5], nil, "savedview 5: ResetView(5)")
+check(tostring(rec.results[5].detail):find("after ResetView(5): cameraView 5", 1, true), "  on view 5")
+S.Answer(true)
+S.Next()   -- the /reload
+check(tostring(rec.results[8].detail):find("reload after ResetView(5): ", 1, true), "savedview 8: read after the /reload")
+S.Answer(false)
+S.Run()
+eq(WoW.cvars.cameraView, "2", "savedview 10: SetView(2)")
+S.Answer(true)
+from = #WoW.calls
+S.Run()
+eq(WoW.calls[from + 1], "SaveView(5)", "savedview 12: Enter's SaveView(5)")
+eq(WoW.calls[from + 2], "SetView(2)", "  then SetView(2)")
+check(tostring(rec.results[12].detail):find("after SaveView(5), SetView(2):", 1, true), "  both named")
+S.Answer(true)
+S.Run()
+eq(WoW.cvars.cameraView, "5", "savedview 14: the exit's SetView(5)")
+S.Answer(false)
+S.Next()
+check(tostring(rec.results[17].detail):find("reload on view 5: cameraView 5", 1, true), "savedview 17: read after the /reload")
+S.Answer(false)
+S.Run()
+eq(WoW.cvars.cameraView, "2", "savedview 19: back on view 2")
+S.Answer(true)
+S.Next()
+S.Answer(true)
+eq(rec.status, "done", "the savedview procedure finishes")
+eq(WoW.camera.savedViews[5], nil, "  its cleanup reset saved view 5")
+eq(WoW.cvars.cameraView, "2", "  on view 2")
+expectedErrors = expectedErrors + (#errors - errs4)
+eq(#errors - errs4, 3, "  three refusals: gamepad mode, Never, the pending repair")
+WoW.cvars.cameraSmoothStyle = "4"
+rawset(_G, "C_CVar", hadCVar2)
+rawset(_G, "C_InputInterfaceStyle", nil)
+WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE, WoW.cvars.cameraDistanceD = nil, nil, nil
+
+-- #51, the way out of saved view 5: three candidates, each from the exit's
+-- stuck state (SaveView(5), SetView(5)).
+local errs5 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "2", "5"
+fp("steps ls viewfix")
+rec = record("viewfix")
+S.Next()
+eq(rec.at, 2, "viewfix 2: refused on view 5")
+check(logHas("on view 5 already"), "  saying why")
+WoW.cvars.cameraView = "3"
+S.Run()
+eq(LibShowcaseProbeDB.viewfix.view, "3", "viewfix 2: the start's own view kept")
+local function stuck(i)
+    local from = #WoW.calls
+    WoW.camera.zoom = 9
+    S.Run()
+    eq(WoW.calls[from + 1], "SaveView(5)", ("viewfix %d: stuck, SaveView(5)"):format(i))
+    eq(WoW.cvars.cameraView, "5", "  then SetView(5)")
+    S.Answer(false)
+end
+local function settled(i)
+    eq(rec.at, i, ("viewfix %d: waiting for the camera to settle"):format(i))
+    WoW.advance(3); S.Poll()
+end
+-- A: ResetView(5).
+stuck(3)
+WoW.camera.savedViews[5] = 9
+S.Run()
+eq(WoW.camera.savedViews[5], nil, "viewfix 5: ResetView(5)")
+check(tostring(rec.results[5].detail):find("reset (from view 5, zoom 9)", 1, true), "  read, with the state before")
+settled(6)
+check(tostring(rec.results[6].detail):find("settled: zoom 9 (before the button 9), cameraView 5", 1, true), "  the settled zoom read")
+S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
+-- B: the CVar only.
+stuck(12)
+local from = #WoW.calls
+S.Run()
+eq(WoW.cvars.cameraView, "3", "viewfix 14: the CVar written back to the start's view")
+local setViews = 0
+for i = from + 1, #WoW.calls do if WoW.calls[i]:find("^SetView") then setViews = setViews + 1 end end
+eq(setViews, 0, "  with no SetView")
+settled(15)
+S.Answer(true); S.Answer(true); S.Next(); S.Answer(false)
+-- C: SetView, then the zoom read just before the button put back: Get stuck
+-- read 9, the tester zoomed out to 12, SetView leaves 4 (Codex, PR #62).
+stuck(21)
+WoW.camera.zoom = 12
+local realSetView = SetView
+rawset(_G, "SetView", function(slot) realSetView(slot); WoW.camera.zoom = 4 end)
+S.Run()
+rawset(_G, "SetView", realSetView)
+eq(WoW.cvars.cameraView, "3", "viewfix 23: SetView to the start's view")
+eq(WoW.camera.zoom, 12, "  and the zoom from just before the button put back, not Get stuck's")
+settled(24)
+check(tostring(rec.results[24].detail):find("settled: zoom 12 (before the button 12), cameraView 3", 1, true), "  the settled zoom read")
+S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
+eq(rec.status, "done", "the viewfix procedure finishes")
+eq(WoW.cvars.cameraView, "3", "  back on the start's view")
+eq(WoW.camera.savedViews[5], nil, "  saved view 5 reset")
+expectedErrors = expectedErrors + (#errors - errs5)
+eq(#errors - errs5, 1, "  one refusal, view 5 at the start")
+WoW.cvars.cameraSmoothStyle = "4"
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
