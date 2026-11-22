@@ -1155,6 +1155,20 @@ check(not LibStub("LibShowcase-1.0").eventFrame:IsEventRegistered("UNIT_SPELLCAS
     "  Stop on the framing question after it: a later /fp ls show has no cast events")
 SC:ForceRestore("test")
 untilEnded()
+-- Close skipped, the exit wait timed out: the presentation closes there, so
+-- the framing question has no showcase left open (Codex, PR #71).
+castviewToOpen()
+ticks(0.1, 20); S.Poll()
+S.DoneByHand()   -- the cast
+S.Skip()         -- Close
+check(SC:IsActive(), "castview: Close skipped, still presenting")
+WoW.advance(21); S.Poll()
+eq(rec.results[8].status, "timeout", "castview 8: the exit wait times out")
+eq(SC.opts.castAware, false, "  castAware off")
+untilEnded()
+check(not SC:IsActive() and not SC:IsOwner(), "  the presentation closed, the lease given back")
+check(UIParent:IsShown(), "  the game UI shown")
+fp("steps stop")
 -- Stopped mid-trial: the presentation closes, castAware off; a later
 -- ordinary presentation isn't cast-aware (Codex, PR #71).
 castviewToOpen()

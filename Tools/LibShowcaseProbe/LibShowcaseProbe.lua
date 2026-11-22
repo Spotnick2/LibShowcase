@@ -2208,11 +2208,10 @@ end
 local function R13Leave(outcome)
     if outcome == "stopped" then R13Disarm() end
 end
--- Back to Close keeps the trial; any other way off the exit wait ends it.
+-- Back to Close keeps the trial; any other way off the exit wait ends it,
+-- the presentation too when Close was skipped (Codex, PR #71).
 local function R13LeaveExit(outcome)
-    if outcome == "back" then return end
-    SC.opts.castAware, R13.armed = false, nil
-    if outcome == "stopped" then R13Disarm() end
+    if outcome ~= "back" then R13Disarm() end
 end
 
 -- The end: view 4 reset, then view 2 (measured to follow), or the start's
