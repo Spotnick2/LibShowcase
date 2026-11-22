@@ -36,6 +36,9 @@
 --   savedview saved view 5 on mouse and keyboard: the reporter's ResetView(5),
 --             the library's SaveView/SetView calls, each across a /reload:
 --             does the camera swing back behind a walking character (#51)?
+--   viewfix   three ways out of saved view 5, each from the exit's stuck state:
+--             ResetView(5), the cameraView CVar, SetView and the zoom: does
+--             the camera jump, follow, and still follow after a /reload (#51)?
 --   release   the r10 release check: female framing, the orbit at another
 --             turn speed, a later combat-start handler refused, a 90 s
 --             countdown, a presentation in gamepad mode
@@ -1773,6 +1776,98 @@ Probe:Steps("savedview", {
     { text = "Cleaning up: ResetView(5) clears the saved view this test wrote; you stay on view 2.", auto = true,
       run = function() return SVCall("ResetView", 5) end },
 })
+
+-- 19. #51, the way out. MEASURED (savedview, runs #572 to #575, Always): the
+-- camera follows on view 2, also after SaveView(5); SetView(5) onto the saved
+-- view stops it, and it stays stopped after a /reload; SetView(2) brings it
+-- back for good. The exit's SetView(5) is what puts the player's camera back
+-- where it was, so each candidate starts from that stuck state and is judged
+-- on three things: does the camera jump, does it follow, and after a /reload?
+--   reset  ResetView(5) while on view 5 (the reporter's macro)
+--   cvar   SetCVar("cameraView", the start's view): the index only
+--   view   SetView(the start's view), then the zoom put back
+local VF = { view = "2", zoom = nil }
+
+local function VFStart()
+    if InGamepadMode() then error("gamepad mode is on: use the mouse and keyboard (move the mouse), then Retry", 0) end
+    local style = tostring(GetCVar("cameraSmoothStyle"))
+    if not FOLLOWING_STYLES[style] then
+        error(("Camera Following Style is %s, which doesn't follow out of combat: set it to Always"
+            .. " (Options > Controls > Camera), then Retry"):format(style), 0)
+    end
+    local v = tostring(GetCVar("cameraView"))
+    if v == "5" then error("on view 5 already: the start needs your own view. Type /run SetView(2), then Retry", 0) end
+    LibShowcaseProbeDB.viewfix = { view = v }
+    return SVRead("start")
+end
+
+local function VFView()
+    local db = type(LibShowcaseProbeDB.viewfix) == "table" and LibShowcaseProbeDB.viewfix or {}
+    return tonumber(db.view) or 2
+end
+
+-- The exit's state: the camera saved into view 5, then put back by SetView(5).
+local function VFStuck()
+    VF.zoom = tonumber(GetCameraZoom())
+    local line = SVCall("SaveView", 5, "SetView", 5)
+    return ("%s; zoom %s"):format(line, tostring(VF.zoom))
+end
+
+local function VFTry(how)
+    local before = ("view %s, zoom %s"):format(tostring(GetCVar("cameraView")), tostring(GetCameraZoom()))
+    local back = VFView()
+    if how == "reset" then
+        ResetView(5)
+    elseif how == "cvar" then
+        SetCVar("cameraView", tostring(back))
+    else
+        local zoom = VF.zoom or tonumber(GetCameraZoom())
+        SetView(back)
+        local now = tonumber(GetCameraZoom()) or zoom
+        if zoom and now and math.abs(zoom - now) > 0.001 then
+            if zoom > now then CameraZoomOut(zoom - now) else CameraZoomIn(now - zoom) end
+        end
+    end
+    return SVRead(("%s (from %s); zoom now %s"):format(how, before, tostring(GetCameraZoom())))
+end
+
+local VF_JUMP = "Did the camera jump or move when you pressed it (say how in the Note box)?"
+
+local function VFCandidate(label, how, what)
+    return {
+        { text = ("%s. Get stuck saves the camera into view 5 and puts it back with SetView(5), as an exit does.")
+            :format(label), button = "Get stuck", run = VFStuck },
+        { text = "Stuck (the control, it shouldn't): " .. SV_ASK, ask = true },
+        { text = ("Zoom out a little and drag the camera to look at the character from the side, leave it there, then"
+            .. " press the button: %s"):format(what), button = label, run = function() return VFTry(how) end },
+        { text = VF_JUMP, ask = true },
+        { text = "Now: " .. SV_ASK, ask = true },
+        { text = "Type /reload: does it last?", reload = true },
+        { text = "Reading after the /reload.", auto = true, run = function() return SVRead("reload after " .. how) end },
+        { text = "After the /reload: " .. SV_ASK, ask = true },
+    }
+end
+
+do
+    local steps = {
+        title = "The way out of saved view 5 (#51)",
+        { text = "Mouse and keyboard, Camera Following Style Always, out of combat, room to walk. Three candidates, each"
+            .. " from the stuck state an exit leaves. For each one, watch two things: whether the camera JUMPS when you"
+            .. " press its button (the best one leaves it exactly where it was), and whether it then follows: " .. SV_ASK },
+        { text = "Reading the view (it must be your own, not 5).", auto = true, run = VFStart },
+    }
+    local candidates = {
+        { "A: ResetView(5)", "reset", "ResetView(5) on the saved view (the reporter's macro)." },
+        { "B: the CVar", "cvar", "only the cameraView CVar written back to your own view." },
+        { "C: SetView", "view", "SetView back to your own view, then the zoom put back." },
+    }
+    for _, c in ipairs(candidates) do
+        for _, s in ipairs(VFCandidate(c[1], c[2], c[3])) do steps[#steps + 1] = s end
+    end
+    steps[#steps + 1] = { text = "Cleaning up: ResetView(5), then SetView back to your own view.", auto = true,
+        run = function() return SVCall("ResetView", 5, "SetView", VFView()) end }
+    Probe:Steps("viewfix", steps)
+end
 
 ----------------------------------------------------------------------------
 -- Load

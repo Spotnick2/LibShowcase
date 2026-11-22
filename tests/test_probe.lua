@@ -934,6 +934,59 @@ rawset(_G, "C_CVar", hadCVar2)
 rawset(_G, "C_InputInterfaceStyle", nil)
 WoW.cvars.cameraDistanceE, WoW.cvars.cameraPitchE, WoW.cvars.cameraDistanceD = nil, nil, nil
 
+-- #51, the way out of saved view 5: three candidates, each from the exit's
+-- stuck state (SaveView(5), SetView(5)).
+local errs5 = #errors
+WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "2", "5"
+fp("steps ls viewfix")
+rec = record("viewfix")
+S.Next()
+eq(rec.at, 2, "viewfix 2: refused on view 5")
+check(logHas("on view 5 already"), "  saying why")
+WoW.cvars.cameraView = "3"
+S.Run()
+eq(LibShowcaseProbeDB.viewfix.view, "3", "viewfix 2: the start's own view kept")
+local function stuck(i)
+    local from = #WoW.calls
+    WoW.camera.zoom = 9
+    S.Run()
+    eq(WoW.calls[from + 1], "SaveView(5)", ("viewfix %d: stuck, SaveView(5)"):format(i))
+    eq(WoW.cvars.cameraView, "5", "  then SetView(5)")
+    S.Answer(false)
+end
+-- A: ResetView(5).
+stuck(3)
+WoW.camera.savedViews[5] = 9
+S.Run()
+eq(WoW.camera.savedViews[5], nil, "viewfix 5: ResetView(5)")
+check(tostring(rec.results[5].detail):find("reset (from view 5, zoom 9)", 1, true), "  read, with the state before")
+S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
+-- B: the CVar only.
+stuck(11)
+local from = #WoW.calls
+S.Run()
+eq(WoW.cvars.cameraView, "3", "viewfix 13: the CVar written back to the start's view")
+local setViews = 0
+for i = from + 1, #WoW.calls do if WoW.calls[i]:find("^SetView") then setViews = setViews + 1 end end
+eq(setViews, 0, "  with no SetView")
+S.Answer(true); S.Answer(true); S.Next(); S.Answer(false)
+-- C: SetView, then the zoom put back.
+stuck(19)
+WoW.camera.zoom = 4   -- what SetView(3) would leave
+local realSetView = SetView
+rawset(_G, "SetView", function(slot) realSetView(slot); WoW.camera.zoom = 4 end)
+S.Run()
+rawset(_G, "SetView", realSetView)
+eq(WoW.cvars.cameraView, "3", "viewfix 21: SetView to the start's view")
+eq(WoW.camera.zoom, 9, "  and the zoom put back")
+S.Answer(false); S.Answer(true); S.Next(); S.Answer(true)
+eq(rec.status, "done", "the viewfix procedure finishes")
+eq(WoW.cvars.cameraView, "3", "  back on the start's view")
+eq(WoW.camera.savedViews[5], nil, "  saved view 5 reset")
+expectedErrors = expectedErrors + (#errors - errs5)
+eq(#errors - errs5, 1, "  one refusal, view 5 at the start")
+WoW.cvars.cameraSmoothStyle = "4"
+
 ------------------------------------------------------------------------------
 -- Nothing went wrong, nothing went to chat, the log clears in place
 ------------------------------------------------------------------------------
