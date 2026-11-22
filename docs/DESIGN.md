@@ -132,8 +132,9 @@ owner.
     moved for nothing). So a consumer with its own slot sets it before `PLAYER_LOGIN` (AltStable
     does it at its `ADDON_LOADED`, AltStable 1f8fdc6), or passes it to `New` with its db
     available then, when it creates the instance after login (the repair runs inside `New`).
-    `New` can't tell an omitted slot from 5 (`Migrate` fills the default), so the library can't
-    defer the flag by itself. A player the repair missed gets out at their next presentation by
+    The repair can't tell an omitted slot from 5: `New` copies the caller's options, then
+    `Migrate` fills the default into `inst.opts`, which is what the repair reads. Telling them
+    apart would take a marker set in `New` (a MINOR, and no help for existing instances). A player the repair missed gets out at their next presentation by
     that consumer on a style that follows (the exit ends on the fallback, since their own view is
     the saved slot); a presentation by an addon with another slot keeps them on it.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
