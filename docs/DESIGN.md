@@ -106,9 +106,14 @@ owner.
     after a `/reload`; `SetView(2)` then the zoom follows at once and after a `/reload`, with a
     jump to view 2's framing. None of the 15 saved-view CVars (`cameraDistanceA..E`,
     `cameraPitchA..E`, `cameraYawA..E`) is readable through `GetCVar`. Style 1 isn't measured and
-    is treated like 2 and 4. **Not measured yet:** whether the zoom put back after `SetView` lands
-    where it was (the read right after `SetView(2)` was view 2's own 5.55), and whether the view 3
-    fallback (`savedViewSlot` 2 only) follows: only view 2 was measured.
+    is treated like 2 and 4.
+  - **The r12 release check, MEASURED 70959+** (`/fp steps ls r12view`, runs #499 to #503,
+    SPOTNICK2, 2026-11-22, every check PASS). A real presentation, Open then Close, on Only when
+    moving and on Always: the exit ended on the own view (2), the zoom 2 s later matched the
+    zoom at Open (14.99 -> 14.99; 11.99 -> 11.97), the camera ended behind the character and
+    followed, and after a `/reload` it was still on view 2 and following. The login repair: put
+    on view 5 with `SaveView(5)` / `SetView(5)` (no follow), a `/reload` moved it to view 2 with
+    the flag set, and it followed. View 3 followed, also after a `/reload`. No error in Bugsy.
   - **The login repair:** r3 to r11 ended every presentation on the saved view, so their players
     are still there at every login. At `PLAYER_LOGIN` (or `New`, after login), once per consumer
     db, on a style that follows: a player found on `savedViewSlot` goes to the fallback view. The flag
