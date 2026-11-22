@@ -95,7 +95,9 @@ owner.
     (r10's goes to the saved slot), or one that began on Never, is finished on the own view
     (Codex, PR #63).
   - **Never (0):** the exact snap-back to the saved view, as AltStable's block did, then the
-    `cameraView` CVar written back to the player's own view, so the next login loads theirs.
+    `cameraView` CVar written back to the player's own view, so the next login loads theirs. Only
+    when this presentation saved one, which means Never at `Enter` and a `SaveView` that ran
+    (MINOR 15, #75); otherwise the player's own view or the fallback, at their zoom (Codex, PR #77).
   - **Why:** MEASURED 71037 (`/fp steps ls savedview` and `viewfix`, runs #572 to #590,
     SPOTNICK3, on Always and on Only when moving; mouse and keyboard; the test: drag the camera
     to the side, let go, walk forward with W). The camera follows on view 2, also after
@@ -169,8 +171,22 @@ owner.
     older copy already started went to the cast slot and marked the view done: when the slot moves
     the destination, the end of the exit sets the view and zoom again (Codex, PR #73).
     Without castAware nothing writes view 4, so a player on it chose it, and the exit ends there.
-    Still open: castAware writes view 4 for players presenting from another view, so view 4
+    Still open (#75): castAware writes view 4 for players presenting from another view, so view 4
     stops following for them if they pick it later.
+  - **A written saved view stays written, MEASURED 71037** (#75, SPOTNICK3, 2026-11-22). The client
+    keeps each written view in the account's `config-cache.wtf` (`cameraDistanceD`,
+    `cameraPitchD`, `cameraYawD` for view 4; `...E` for view 5), and loads it at every login and
+    `/reload`. Both accounts' files hold a view 4 and a view 5; neither holds view 3, and view 3
+    followed after a `/reload` (r12view). **`ResetView` lasts the session only:** after
+    castview's `ResetView(4)` and a `/reload`, the file still held the probe's `SaveView(4)`.
+    **Addon code can't clear it either:** `/fp steps ls view4clear` (runs #611 to #613) ran
+    `ResetView(4)`, then `C_CVar.SetCVar(name)` with no value on each of the three: every setter
+    returned nil, `GetCVar` and `C_CVar.GetCVarInfo` read nil for them before and after, the
+    file kept the same three values, and after a `/reload` view 4 didn't follow, nor after a
+    second (the control, view 2, followed). In the same session, `ResetView(4)` then
+    `SetView(4)` does follow (view4, run #604), until the next `/reload`. So a view the library
+    wrote stays written for that account; only a `ResetView` each session undoes it, and only
+    for that session.
   - **The r14 release check, MEASURED 71037** (`/fp steps ls castview`, runs #608 and #609,
     SPOTNICK3, 2026-11-22, Only when moving, mouse and keyboard, MINOR 14 at `main` 29c3c53). The
     tester made a view 4 facing the character (`SaveView(4)`, `SetView(4)`) and presented from it
@@ -202,6 +218,15 @@ owner.
     would cost a Never player their preset. The #51 login repair stays as it is.
   - Players already left with a written view 4 or 5 keep it (nothing can clear it); MINOR 15 stops
     adding to it.
+  - **The r15 release check, MEASURED 71037** (`/fp steps ls r15check`, runs #615 and #616,
+    SPOTNICK3, 2026-11-22, mouse and keyboard; every `SaveView` call counted through a post-hook).
+    castAware on Only when moving, from view 2: a cast took the reset swing (`castReset`), Close
+    ended on view 2 at the zoom of Open (8.55 -> 8.53), **no `SaveView`**; the camera ended where it
+    was before Open and followed (yes), still view 2 after a `/reload` and following (yes). Portal
+    Roulette used normally (the wheel, a teleport cast, under this copy as the newest): **no
+    `SaveView`** between Arm and Done, and the camera followed where the player arrived (yes); the
+    cast's camera "unsure: nothing changed since the reload". Never: exactly one `SaveView` (into
+    5), the snap-back exactly where it was (yes), view 2 and the zoom of Open. No error in Bugsy.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

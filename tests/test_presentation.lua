@@ -632,6 +632,7 @@ for _, case in ipairs({ { "90", 180 / 90 }, { "180", 1 }, { "360", 180 / 360 }, 
     local want = -(0.005 * case[2])
     eq(WoW.camera.yaw, want, "cameraYawMoveSpeed " .. case[1] .. ": the settled orbit at orbitSpeed scaled by " .. case[2])
     WoW.fire("UNIT_SPELLCAST_START", "player")
+    eq(WoW.camera.yaw, -(0.78 * case[2]), "  the cast's reset swing scaled the same (Codex, PR #77)")
     ticks(0.1, 5)   -- the reset swing (#75)
     WoW.fire("UNIT_SPELLCAST_STOP", "player")
     eq(WoW.camera.yaw, want, "  and the orbit a cast's end resumes")
