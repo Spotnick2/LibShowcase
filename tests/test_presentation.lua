@@ -55,7 +55,7 @@ do
     eq(win:GetFrameStrata(), "MEDIUM", "  at its own strata")
     eq(win:GetScale(), 1, "  and scale")
     eq(GameTooltip:GetParent(), UIParent, "GameTooltip back")
-    eq(WoW.camera.view, 5, "the saved view is snapped back")
+    eq(WoW.camera.view, 2, "the exit ends on the player's own view, 2 when unknown (#51)")
     check(SC:IsActive(), "the presentation is still winding down")
     ticks(0.1, 5)
     check(not SC:IsActive(), "and ends after exitDuration")
@@ -492,6 +492,171 @@ do
     check(okExit and not SC:IsActive(), "  and restores")
     rawset(_G, "UnitAffectingCombat", affecting)
     rawset(_G, "UnitSex", sex)
+end
+
+------------------------------------------------------------------------------
+-- #51: the view an exit ends on. Ending on the saved view stops the camera
+-- following (MEASURED 70959+, viewfix runs #577 to #590): on a style that
+-- follows, the exit ends on the player's own view and puts the zoom back; on
+-- Never, it snaps back to the saved view and writes cameraView back.
+------------------------------------------------------------------------------
+local function firstSetView(from)
+    for _, c in ipairs(callsSince(from)) do if c:find("^SetView") then return c end end
+end
+local function present(style, view, slot)
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = style, view
+    local SC = lib:New({ owner = "A", savedViewSlot = slot })
+    WoW.camera.zoom = 12
+    check(SC:Enter(newWindow("MEDIUM")), "presenting on style " .. style .. ", view " .. view)
+    ticks(0.1, 16)
+    return lib, SC
+end
+
+for _, style in ipairs({ "1", "2", "4" }) do
+    local lib, SC = present(style, "3")
+    local from = #WoW.calls
+    SC:Exit("closed")
+    eq(firstSetView(from), "SetView(3)", "style " .. style .. ": the exit ends on the player's own view at once")
+    eq(WoW.camera.zoom, 12, "  and puts the zoom back")
+    local mid = #WoW.calls
+    ticks(0.1, 6)
+    check(not SC:IsActive(), "  the exit completes")
+    local again = false
+    for _, c in ipairs(callsSince(mid)) do if c:find("^SetView") or c:find("^CameraZoom") then again = true end end
+    check(not again, "  with no second SetView or zoom (it would snap the zoom mid-animation)")
+    eq(WoW.cvars.cameraView, "3", "  cameraView is the player's")
+end
+
+do  -- Stuck on the saved view already (an older copy's exit): the exit ends on 2.
+    local lib, SC = present("4", "5")
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "2", "entered on the saved view: the exit ends on view 2")
+end
+
+do  -- A forced restore mid-presentation (combat) also ends on the own view.
+    local lib, SC = present("2", "4")
+    WoW.enterCombat()
+    eq(WoW.cvars.cameraView, "4", "combat mid-presentation: back on the player's own view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+    WoW.leaveCombat()
+end
+
+do  -- Never: the exact snap-back, then cameraView written back.
+    local lib, SC = present("0", "3")
+    local from = #WoW.calls
+    SC:Exit("closed")
+    eq(firstSetView(from), "SetView(5)", "Never: the exit snaps back to the saved view")
+    ticks(0.1, 6)
+    eq(WoW.camera.view, 5, "  and stays on its framing")
+    eq(WoW.cvars.cameraView, "3", "  with cameraView written back: the next login loads the player's own view")
+    check(hasCall("SetCVar(cameraView, 3)"), "  written by SetCVar, not SetView")
+end
+
+do  -- Never at the exit's start, a following style at its end: the end of
+    -- the exit still puts the player's own view back (Codex, PR #63).
+    local lib, SC = present("0", "3")
+    SC:Exit("closed")
+    WoW.cvars.cameraSmoothStyle = "2"
+    ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "the style switched to a following one mid-exit: the exit ends on the own view")
+    eq(WoW.camera.zoom, 12, "  at their zoom")
+end
+
+do  -- savedViewSlot 2 (Codex, PR #63): the fallback is never the saved slot.
+    local lib, SC = present("4", "2", 2)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "3", "savedViewSlot 2, entered on view 2: the exit ends on view 3")
+    lib, SC = present("4", "4", 2)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "4", "savedViewSlot 2, entered on view 4: the exit ends on view 4")
+end
+
+do  -- A consumer's own savedViewSlot.
+    local lib, SC = present("4", "2", 3)
+    SC:Exit("closed"); ticks(0.1, 6)
+    eq(WoW.cvars.cameraView, "2", "savedViewSlot 3: the exit ends on the player's view 2")
+end
+
+------------------------------------------------------------------------------
+-- #51: the login repair, once per db, on a style that follows.
+------------------------------------------------------------------------------
+do
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "5"
+    local DB = {}
+    lib:New({ owner = "A", db = function() return DB end })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "login on the saved view: back to view 2")
+    eq(DB.LibShowcaseViewRepaired, true, "  the db marked")
+    eq(lib.VIEW_REPAIR_DB_KEY, "LibShowcaseViewRepaired", "  under the public key")
+    WoW.cvars.cameraView = "5"   -- the player chose it again
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "5", "  never twice")
+end
+
+do  -- Never: left alone, and not marked, so a later switch still repairs.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "0", "5"
+    local DB = {}
+    lib:New({ owner = "A", db = function() return DB end })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "5", "Never at login: left on the saved view")
+    eq(DB.LibShowcaseViewRepaired, nil, "  and not marked")
+    WoW.cvars.cameraSmoothStyle = "2"
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "2", "  repaired once the style follows")
+end
+
+do  -- Not on the saved view: marked, nothing moved.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local DB = {}
+    lib:New({ owner = "A", db = function() return DB end })
+    local from = #WoW.calls
+    WoW.fire("PLAYER_LOGIN")
+    eq(#callsSince(from), 0, "login on the player's own view: nothing called")
+    eq(DB.LibShowcaseViewRepaired, true, "  the db marked")
+end
+
+do  -- No db: nothing to remember it in, so nothing done.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "5"
+    lib:New({ owner = "A" })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "5", "no db: no repair")
+end
+
+do  -- An instance created after login repairs at New.
+    local lib = freshLibrary()
+    WoW.loggedIn = true
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local DB = {}
+    lib:New({ owner = "A", db = DB, savedViewSlot = 3 })
+    eq(WoW.cvars.cameraView, "2", "New after login, on its own savedViewSlot 3: back to view 2")
+    eq(DB.LibShowcaseViewRepaired, true, "  marked")
+end
+
+do  -- savedViewSlot 2: the repair goes to view 3, not the slot it leaves.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
+    local DB = {}
+    lib:New({ owner = "A", db = function() return DB end, savedViewSlot = 2 })
+    WoW.fire("PLAYER_LOGIN")
+    eq(WoW.cvars.cameraView, "3", "savedViewSlot 2, on view 2 at login: to view 3")
+end
+
+do  -- Not while another instance presents.
+    local lib = freshLibrary()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "2"
+    local A = lib:New({ owner = "A" })
+    check(A:Enter(newWindow("MEDIUM")), "A presents")
+    WoW.cvars.cameraView = "5"
+    WoW.loggedIn = true
+    local DB = {}
+    lib:New({ owner = "B", db = DB })
+    eq(DB.LibShowcaseViewRepaired, nil, "B created mid-presentation: no repair, not marked")
+    A:ForceRestore()
 end
 
 done("test_presentation")

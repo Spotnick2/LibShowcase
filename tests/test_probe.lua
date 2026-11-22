@@ -472,7 +472,7 @@ S.Run()
 check(SC:IsActive() and win:IsShown() and SC:IsGameUIHidden(), "follow 4: Retry with the control still good presents, the UI hidden")
 S.Run(); untilEnded()
 check(tostring(rec.results[6].detail):find("the presentation ended", 1, true), "follow 6: a normal exit")
-eq(DB.follow.exit[1], "cameraView 0 -> 5", "follow 7: the view left on 5 is named, and saved")
+eq(DB.follow.exit[1], "cameraView 0 -> 2", "follow 7: the view the exit leaves is named, and saved (2: #51)")
 eq(#DB.follow.exit, 1, "  and only that: compared with the trial's camera, not the start's")
 S.Answer(false)
 -- Reset puts the view back and reads it back; one Open per control.

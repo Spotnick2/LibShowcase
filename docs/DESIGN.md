@@ -20,7 +20,7 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 | Instance method (colon) | Does |
 |---|---|
 | `SC:Enter(anchor?)` | Start the presentation. `anchor` is the consumer's window, lifted above the hidden UI. Returns `true`, or `false, "combat" \| "unsupported" \| "busy"`. Re-entering during the exit animation finishes the exit and starts afresh. |
-| `SC:Exit(reason?)` | UI back at once, view snapped back, the rest restored when `exitDuration` has passed. |
+| `SC:Exit(reason?)` | UI back at once, the view put back (the player's own, or the saved one on Never: Guarantees, "The view an exit ends on"), the rest restored when `exitDuration` has passed. |
 | `SC:ForceRestore(reason?)` | Everything back now. |
 | `SC:IsActive()` / `SC:IsOwner()` | This instance's presentation is running / holds the lease. |
 | `SC:Acquire()` / `SC:Release()` | Hold the lease without a camera (a camera-OFF consumer); `Release` restores everything first. |
@@ -33,8 +33,9 @@ local SC = LibStub("LibShowcase-1.0"):New(opts)   -- colon; a dot call errors
 Library functions (dot): `lib.SuppressExperimentalCVarPopup()` (returns a count),
 `lib.ShoulderOffsetFor(raceFileOrID, zoom, mounted?, sex?)` (`sex` 3 is female, MINOR 8, #38). Public tables, filled in place:
 `lib.CENTRING_CVARS`, `lib.SHOULDER_FACTORS` (the male column), `lib.FEMALE_SHOULDER_FACTORS`, `lib.MOUNTED_SHOULDER_FACTORS`, `lib.RACE_IDS`,
-`lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`) and
-`lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4).
+`lib.WORLD_NAME_CVARS` (MINOR 4). The db keys: `lib.DB_KEY` (`"LibShowcaseCapture"`),
+`lib.NAMES_DB_KEY` (`"LibShowcaseNames"`, MINOR 4) and `lib.VIEW_REPAIR_DB_KEY`
+(`"LibShowcaseViewRepaired"`, MINOR 12: the login repair has run for this db).
 
 ### Options
 
@@ -56,7 +57,7 @@ which `Enter` reads (and clamps, to AltStable's ranges) each time.
 | `yawDegrees`, `yawOffset` | 430, -0.22 | the entry swing; the sign of `yawOffset` is its direction |
 | `enterDuration`, `exitDuration` | 1.5, 0.45 | 0.35-1.5, 0.25-1.2 |
 | `orbit`, `orbitSpeed` | true, 0.005 | The orbit's `MoveView*Start` speed at the default `cameraYawMoveSpeed` (180). Since MINOR 7 (#39) it is scaled by `180 / cameraYawMoveSpeed`, as the entry turn is, so the orbit looks the same whatever the player's camera turn speed. The setting is read each time the orbit starts (the end of the entry) or resumes (a cast's end), so a change mid-presentation is followed. MEASURED 70959 (`/fp steps ls orbitspeed`, run #426): one full turn at `MoveViewLeftStart(0.1)` took 40.1 s at 90 and 10.1 s at 360 (ratio 3.98), so the speed does scale with the CVar |
-| `savedViewSlot` | 5 | 2-5, the player's own view |
+| `savedViewSlot` | 5 | 2-5: the slot `Enter` saves the player's camera into (`SaveView`). Only the exit on Camera Following Style Never goes back to it (MINOR 12, #51) |
 | `presentationViewSlot` | 4 | castAware's settled view; ignored when equal to `savedViewSlot` |
 | `hideUI`, `anchorStrata` | true, "DIALOG" | |
 | `salute` | false | `DoEmote("SALUTE")` once settled, out of combat |
@@ -81,6 +82,40 @@ owner.
 
 ## Guarantees
 
+- **The view an exit ends on** (MINOR 12, #51). `Enter` captures the player's view (`cameraView`),
+  saves their camera into `savedViewSlot` and switches to view 2. The exit depends on Camera
+  Following Style (`cameraSmoothStyle`; the dropdown: 1 "Only horizontal when moving", 4 "Only when
+  moving", the default, 2 "Always adjust camera", 0 "Never adjust camera"):
+  - **A style that follows (1, 2, 4):** the exit ends on the player's own view and puts the zoom
+    back. When the own view was the saved slot or isn't known, the exit goes to a fallback instead:
+    view 2, or view 3 when `savedViewSlot` is 2. The camera ends behind the character at the
+    player's zoom; their exact angle isn't kept. The restore at the end of the exit animation
+    doesn't set the view again (that would snap the zoom mid-animation), but only when this copy's
+    exit recorded that it put the view back (`cam.viewDone`). An exit an older copy started
+    (r10's goes to the saved slot), or one that began on Never, is finished on the own view
+    (Codex, PR #63).
+  - **Never (0):** the exact snap-back to the saved view, as AltStable's block did, then the
+    `cameraView` CVar written back to the player's own view, so the next login loads theirs.
+  - **Why:** MEASURED 70959+ (`/fp steps ls savedview` and `viewfix`, runs #572 to #590,
+    SPOTNICK3, on Always and on Only when moving; mouse and keyboard; the test: drag the camera
+    to the side, let go, walk forward with W). The camera follows on view 2, also after
+    `SaveView(5)`. **`SetView(5)` onto the saved view stops it following**, and since the client
+    keeps `cameraView` (a `SET` in `config-cache.wtf`), every later login loads view 5 and it stays
+    stopped. From that stuck state: `ResetView(5)` (the reporter's macro) follows at once but not
+    after a `/reload`; writing only the `cameraView` CVar doesn't move the camera and follows only
+    after a `/reload`; `SetView(2)` then the zoom follows at once and after a `/reload`, with a
+    jump to view 2's framing. None of the 15 saved-view CVars (`cameraDistanceA..E`,
+    `cameraPitchA..E`, `cameraYawA..E`) is readable through `GetCVar`. Style 1 isn't measured and
+    is treated like 2 and 4. **Not measured yet:** whether the zoom put back after `SetView` lands
+    where it was (the read right after `SetView(2)` was view 2's own 5.55), and whether the view 3
+    fallback (`savedViewSlot` 2 only) follows: only view 2 was measured.
+  - **The login repair:** r3 to r11 ended every presentation on the saved view, so their players
+    are still there at every login. At `PLAYER_LOGIN` (or `New`, after login), once per consumer
+    db, on a style that follows: a player found on `savedViewSlot` goes to the fallback view. The flag
+    is `db.LibShowcaseViewRepaired`. Not on Never (nothing follows there, and a later switch
+    still gets the repair), not without a db, not while a presentation or another instance's
+    lease holds the camera. A player who chose that view is moved once; on it, their camera
+    didn't follow either.
 - **Combat.** `PLAYER_REGEN_DISABLED` runs before the lockdown (MEASURED 70205: `InCombatLockdown()`
   is false inside its handlers), so the library restores everything there, synchronously, then
   calls `onForcedExit("combat")`. A restore that lands inside a lockdown anyway (Escape mid-fight)

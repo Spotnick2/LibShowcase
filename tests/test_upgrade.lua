@@ -443,4 +443,24 @@ do
        "r4's capture restored in gamepad mode: the player's own values once it ends")
 end
 
+-- #51 (Codex, PR #63): an exit an older copy started (r10: SetView to the
+-- saved slot, the rest at the end) is finished by the newer copy on the
+-- player's view. r10 captured no view: the fallback, view 2.
+do
+    WoW.reset(); WoW.resetLibStub()
+    WoW.cvars.cameraSmoothStyle, WoW.cvars.cameraView = "4", "3"
+    local old = loadCopy(releasedCopy("tests/fixtures/LibShowcase-r10"), "PortalRoulette")
+    local SC = old:New({ owner = "PortalRoulette" })
+    WoW.camera.zoom = 12
+    check(SC:Enter(newWindow("MEDIUM")), "r10 presents")
+    ticks(0.1, 16)
+    SC:Exit("closed")
+    eq(WoW.cvars.cameraView, "5", "r10's exit goes to the saved slot")
+    eq(loadCopy(copyOf(), "AltStable"), old, "the newer copy loads mid-exit")
+    ticks(0.1, 6)
+    check(not SC:IsActive(), "the exit completes under the newer copy")
+    eq(WoW.cvars.cameraView, "2", "  on view 2, not the saved slot")
+    eq(WoW.camera.zoom, 12, "  at the player's zoom")
+end
+
 done("test_upgrade")
