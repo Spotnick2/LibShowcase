@@ -1386,12 +1386,30 @@ do
     S.Skip(); S.Skip(); WoW.advance(3); S.Poll()
     eq(rec.results[18].check, "FAIL", "r15check 18: Open refused, skipped: FAIL, no presentation opened")
     check(tostring(rec.results[18].detail):find("no presentation opened in this attempt", 1, true), "  saying so")
+    -- A passing Never trial, then Back to Open and Open skipped (and Close):
+    -- the earlier attempt's open, view and save don't stand in (Codex, PR #78).
+    S.Back(); S.Back(); S.Back()
+    WoW.cvars.cameraSmoothStyle = "0"
+    S.Run(); S.Run(); untilEnded(); WoW.advance(3); S.Poll()
+    eq(rec.results[18].check, "PASS", "r15check 18: a Never trial passes again")
+    S.Back(); S.Back(); S.Back()
+    eq(rec.at, 16, "  back on Open")
+    S.Skip(); S.Skip(); WoW.advance(3); S.Poll()
+    eq(rec.results[18].check, "FAIL", "r15check 18: Open skipped after a pass: FAIL, the earlier attempt doesn't stand in")
     S.Answer(true)
     WoW.cvars.cameraSmoothStyle = "4"
     S.Run()
     eq(rec.status, "done", "the r15check procedure finishes")
     eq(WoW.cvars.cameraView, "2", "  on view 2")
     eq(#errors - errs10, 1, "  one refusal, on purpose")
+    -- A new run in the same session, Open skipped: part 1's exit can't be
+    -- scored against the earlier run's Open (Codex, PR #78).
+    WoW.cvars.cameraView = "3"
+    fp("steps ls r15check")
+    rec = record("r15check")
+    S.Next(); S.Skip(); S.Skip(); S.Skip(); WoW.advance(3); S.Poll()
+    eq(rec.results[6].check, "FAIL", "r15check 6: a new run with Open skipped: FAIL")
+    fp("steps stop")
 end
 -- Below MINOR 14: the start refuses.
 do

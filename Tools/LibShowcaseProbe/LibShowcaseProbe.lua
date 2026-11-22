@@ -2502,6 +2502,9 @@ end
 -- A new run starts with nothing from an earlier one, reset before the guards.
 local function R15Start()
     LibShowcaseProbeDB.r15, R15.obs = {}, {}
+    -- Nothing of an earlier run's trials either (Codex, PR #78).
+    R15.opened, R15.view, R15.zoom, R15.savesAt, R15.endedAt = nil, nil, nil, nil, nil
+    R15.cast, R15.armed, R15.consumerAt, R15.consumerCast = nil, nil, nil, nil
     local minor = select(2, LibStub:GetLibrary("LibShowcase-1.0"))
     if (tonumber(minor) or 0) < 15 then
         error(("the loaded library is MINOR %s; this check needs 15 (deploy this checkout), then Retry"):format(tostring(minor)), 0)
@@ -2522,7 +2525,7 @@ end
 -- attempt opened (Codex, PR #78).
 local function R15Open(castAware, style)
     local key = castAware and "exit" or "never"
-    R15.obs[key], R15.opened = nil, false
+    R15.obs[key], R15.opened = nil, nil
     if castAware then R15.obs.cast, R15.obs.reload, R15Saved().want = nil, nil, nil end
     if style then R15Style(style) end   -- a refusal leaves the attempt unopened
     R15.view, R15.zoom, R15.endedAt, R15.cast, R15.armed = tostring(GetCVar("cameraView")), tonumber(GetCameraZoom()), nil, nil, castAware
@@ -2533,7 +2536,7 @@ local function R15Open(castAware, style)
         SC.opts.castAware, R15.armed = false, nil
         error(err, 0)
     end
-    R15.opened = true
+    R15.opened = key   -- this part's exit is scored against this Open only
     local line = ("%s: presenting from cameraView %s, zoom %s"):format(castAware and "castAware" or "plain", R15.view, tostring(R15.zoom))
     say("== r15check " .. line)
     return true, line
@@ -2568,7 +2571,7 @@ end
 -- The exit's result, 2 s after the presentation ended.
 local function R15Exited(key, wantSaves)
     return function()
-        if not R15.opened then return R15Observe(key, false, "no presentation opened in this attempt") end
+        if R15.opened ~= key then return R15Observe(key, false, "no presentation opened in this attempt") end
         if SC:IsActive() or SC:IsOwner() then return false, "the presentation is still ending" end
         SC.opts.castAware, R15.armed = false, nil
         if not R15.endedAt then R15.endedAt = GetTime() end
@@ -2577,6 +2580,7 @@ local function R15Exited(key, wantSaves)
         local saves = R15.saves - (R15.savesAt or R15.saves)
         local zoomOK = zoom ~= nil and R15.zoom ~= nil and math.abs(zoom - R15.zoom) < 0.1
         R15Saved().want = R15.view
+        R15.opened = nil   -- scored once; another read needs another Open
         return R15Observe(key, view == R15.view and zoomOK and saves == wantSaves,
             ("ended on cameraView %s (want %s), zoom %s (at Open %s), SaveView calls %d (want %d)%s"):format(view,
                 R15.view, tostring(zoom), tostring(R15.zoom), saves, wantSaves,
@@ -2622,6 +2626,13 @@ local function R15Disarm()
     end
 end
 local function R15Leave(outcome) if outcome == "stopped" then R15Disarm() end end
+-- Open skipped: nothing of an earlier attempt may stand in for this one.
+local function R15LeaveOpen(key)
+    return function(outcome)
+        if outcome == "skipped" then R15.opened, R15.obs[key] = nil, nil end
+        R15Leave(outcome)
+    end
+end
 local function R15LeaveExit(outcome) if outcome ~= "back" then R15Disarm() end end
 
 Probe:Steps("r15check", {
@@ -2635,7 +2646,7 @@ Probe:Steps("r15check", {
     { text = "Checking the library, the style and the view.", auto = true, run = R15Start },
     -- Part 1: castAware on a following style.
     { text = "Open starts a presentation with castAware on.", button = "Open", run = function() return R15Open(true) end,
-      leave = R15Leave },
+      leave = R15LeaveOpen("exit") },
     { text = "Let it settle, then cast the spell (let it run a second; jumping cancels it). Watch for a short"
         .. " swing. Don't press Escape.", timeout = 120, wait = R15CastSeen, check = R15Check("cast"), leave = R15Leave },
     { text = "Let the cast end, then Close.", button = "Close", run = Close, leave = R15Leave },
@@ -2656,7 +2667,7 @@ Probe:Steps("r15check", {
     { text = "Where you arrived: " .. SV_ASK, ask = true },
     -- Part 3: Never.
     { text = "Set Camera Following Style to Never adjust camera (Options > Controls > Camera), then Open.",
-      button = "Open", run = function() return R15Open(false, "0") end, leave = R15Leave },
+      button = "Open", run = function() return R15Open(false, "0") end, leave = R15LeaveOpen("never") },
     { text = "Close ends it. Watch: the camera should snap back exactly where it was.", button = "Close", run = Close,
       leave = R15Leave },
     { text = "Waiting for the exit, then 2 s for the camera to settle.", timeout = 20,
