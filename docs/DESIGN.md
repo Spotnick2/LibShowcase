@@ -169,8 +169,22 @@ owner.
     older copy already started went to the cast slot and marked the view done: when the slot moves
     the destination, the end of the exit sets the view and zoom again (Codex, PR #73).
     Without castAware nothing writes view 4, so a player on it chose it, and the exit ends there.
-    Still open: castAware writes view 4 for players presenting from another view, so view 4
+    Still open (#75): castAware writes view 4 for players presenting from another view, so view 4
     stops following for them if they pick it later.
+  - **A written saved view stays written, MEASURED 71037** (#75, SPOTNICK3, 2026-11-22). The client
+    keeps each written view in the account's `config-cache.wtf` (`cameraDistanceD`,
+    `cameraPitchD`, `cameraYawD` for view 4; `...E` for view 5), and loads it at every login and
+    `/reload`. Both accounts' files hold a view 4 and a view 5; neither holds view 3, and view 3
+    followed after a `/reload` (r12view). **`ResetView` lasts the session only:** after
+    castview's `ResetView(4)` and a `/reload`, the file still held the probe's `SaveView(4)`.
+    **Addon code can't clear it either:** `/fp steps ls view4clear` (runs #611 to #613) ran
+    `ResetView(4)`, then `C_CVar.SetCVar(name)` with no value on each of the three: every setter
+    returned nil, `GetCVar` and `C_CVar.GetCVarInfo` read nil for them before and after, the
+    file kept the same three values, and after a `/reload` view 4 didn't follow, nor after a
+    second (the control, view 2, followed). In the same session, `ResetView(4)` then
+    `SetView(4)` does follow (view4, run #604), until the next `/reload`. So a view the library
+    wrote stays written for that account; only a `ResetView` each session undoes it, and only
+    for that session.
   - **The r14 release check, MEASURED 71037** (`/fp steps ls castview`, runs #608 and #609,
     SPOTNICK3, 2026-11-22, Only when moving, mouse and keyboard, MINOR 14 at `main` 29c3c53). The
     tester made a view 4 facing the character (`SaveView(4)`, `SetView(4)`) and presented from it
